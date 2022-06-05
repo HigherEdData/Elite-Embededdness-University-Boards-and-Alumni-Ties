@@ -1,0 +1,1561 @@
+---
+title: "Network analysis"
+output: html_document
+---
+
+Load libraries
+```{r warning=FALSE}
+library(tidyverse)
+library(foreign) # to read the stata files
+library(rstatix) # data analysis package
+library(psych) # data analysis package
+library(stargazer) # creates tables from R statistical output
+library(sjPlot)# creates tables from R statistical output
+library(ggpubr) # ggplot extension for lm
+library(GGally)
+library(haven) # to export stata files
+library(qwraps2)
+library(ggpmisc)
+library(plm)
+library(cowplot)
+library(lmtest)
+library(sandwich)
+library(car)
+library(ggrepel)
+library(olsrr)
+library(clubSandwich)
+library(patchwork)
+library(pscl)
+library(chorddiag)
+library(igraph)
+library(visNetwork)
+library(RColorBrewer)
+library(ggraph)
+library(ggforce)
+library(tidygraph)
+library(graphlayouts)
+library(oaqc)
+library(concaveman)
+library(scales)
+```
+
+
+Load data
+```{r}
+board_members <- read_dta("board_members_all_long20220111.dta")
+institution <- read_dta("sat_act_admissions_all_universities_20181223.dta")
+```
+
+
+Add institution name
+```{r}
+institution <- institution %>% 
+ select(institutionname, unitid, acceptrate, year) %>% 
+  unique()
+
+board_members <- board_members %>% 
+  left_join(institution, by = c("unitid","year")) %>% 
+  mutate(private = ifelse(publicprivate=="Private",1,0)) 
+  #%>% 
+ # filter(year>2002)
+```
+
+
+
+Clean up firm names
+```{r}
+board_members <- board_members %>% 
+  mutate(firmname = str_remove_all(firmname, "the ")) %>%
+  mutate(firmname = ifelse(str_detect(firmname, "student"), institutionname, firmname)) %>% 
+  mutate(firmname = ifelse(str_detect(firmname, "president of university"), institutionname, firmname)) %>%
+  mutate(firmname = ifelse(str_detect(firmname, "faculty"), institutionname, firmname)) %>%
+  mutate(firmname = ifelse(str_detect(firmname, "college professor"), institutionname, firmname)) %>%
+  mutate(firmname = ifelse(startsWith(firmname, "man & "), substring(firmname, 7), firmname)) %>% 
+  mutate(firmname = ifelse(startsWith(firmname, "man "), substring(firmname, 5),firmname)) %>%
+  mutate(firmname = ifelse(startsWith(firmname, "member of "), substring(firmname, 11),firmname)) %>%
+  mutate(firmname = ifelse(startsWith(firmname, "vice man "), substring(firmname, 10),firmname)) %>%
+  mutate(firmname = case_when(firmname=="accenture's health & public service operating grou" ~ "accenture",
+                           firmname=="bank of america merrill lynch" ~ "bank of america",
+                           firmname=="bank of america’s consumer and small business bank" ~ "bank of america",
+                           firmname=="blackstone real estate" ~ "blackstone",
+                           firmname=="blackstone’s private equity group" ~ "blackstone",
+                           firmname=="deloitte llp" ~ "deloitte",
+                           firmname=="deloitte tax llp" ~ "deloitte",
+                           firmname=="dlapiper" ~ "dla piper",
+                           firmname=="dupont performance materials" ~ "dupont company",
+                           firmname=="dupont co" ~ "dupont company",
+                           firmname=="exxon upstream development" ~ "exxon mobil",
+                           firmname=="ernst & young llp" ~ "ey",
+                           firmname=="foundations?" ~ "foundations",
+                           firmname=="ge global research" ~ "general electrics",
+                           firmname=="ge infrastructure" ~ "general electrics",
+                           firmname=="georgetown university alumni association" ~ "georgetown university",
+                           firmname=="georgetown university hospital" ~ "georgetown university",
+                           firmname=="global head of private equity blackstone" ~ "blackstone",
+                           firmname=="guggenheim securities" ~ "guggenheim partners",
+                           firmname=="harvard medical school" ~ "harvard",
+                           firmname=="hbo sports" ~ "hbo",
+                           firmname=="ibm and at ims health" ~ "ibm",
+                           firmname=="ibm human resources" ~ "ibm",
+                           firmname=="ibm tucson" ~ "ibm",
+                           firmname=="ibm’s corporate citizenship & corporate affairs" ~ "ibm",
+                           firmname=="intel silicon compilers and tandem computers" ~ "intel",
+                           firmname=="johns hopkins medicine" ~ "johns hopkins university",
+                           firmname=="johns hopkins" ~ "johns hopkins university",
+                           firmname=="kkr" ~ "kohlberg kravis roberts",
+                           firmname=="kraft general foods" ~ "kraft",
+                           firmname=="kraft hbs" ~ "kraft",
+                           firmname=="manatt phelps & phillips llp" ~ "manatt phelps and phillips",
+                           firmname=="massachusetts institute of technology" ~ "mit",
+                           firmname=="mbna bank" ~ "mbna",
+                           firmname=="member & head of client and group kkr" ~ "kohlberg kravis roberts",
+                           firmname=="merrill lynch&co" ~ "merrill lynch",        
+                           firmname=="microsoft ??us" ~ "microsoft",
+                           firmname=="mit + finance+media" ~ "mit",
+                           firmname=="mit finance" ~ "mit", 
+                           firmname=="mit professor" ~ "mit",
+                           firmname=="mit venture mentoring services" ~ "mit",
+                           firmname=="mit/harvard" ~ "mit",
+                           firmname=="nbc news and msnbc" ~ "nbc",
+                           firmname=="oak hill holdings" ~ "oak hill capital",
+                           firmname=="paramount pictures motion picture group" ~ "paramount pictures", 
+                           firmname=="partner brown & connery llp" ~ "brown & connery llp",
+                           firmname=="partner obermayer rebmann maxwell & hippel" ~ "obermayer rebmann maxwell & hippel",
+                           firmname=="partner windels marx lane & mittendorf llp" ~ "windels marx lane & mittendorf llp", 
+                           firmname=="partner winston & strawn llp" ~ "winston & strawn llp",
+                           firmname=="president  northeastern university" ~ "northeastern university",
+                           firmname=="president &  horizon beverage group norton" ~ "horizon beverage group norton", 
+                           firmname=="president &  ketchconsulting" ~ "ketchconsulting",
+                           firmname=="president & denali state bank" ~ "denali state bank",
+                           firmname=="president and   ezstorage" ~ "ezstorage", 
+                           firmname=="	president and  cook inlet tribal council citc" ~ "cook inlet tribal council citc",
+                           firmname=="president and  foundation for the carolinas" ~ "foundation for the carolinas",
+                           firmname=="president and  medstar health" ~ "medstar health",
+                           firmname=="president and  socialradar" ~ "socialradar",
+                           firmname=="president and  sun harvest salt" ~ "sun harvest salt",
+                           firmname=="president and  urban league of springfield springf" ~ "urban league of springfield",
+                           firmname=="president emerita brown university" ~ "brown university",
+                           firmname=="president harvard" ~ "harvard",
+                           firmname=="president of alaska native tribal health consortiu" ~ "alaska native tribal health consortiu",
+                           firmname=="president of cornell university" ~ "cornell university",
+                           firmname=="presidentelect university of notre dame" ~ "university of notre dame",
+                           firmname=="princeton in latin america fellow" ~ "princeton",
+                           firmname=="princeton university" ~ "princeton",
+                           firmname=="sierra trading/tgs management company" ~ "sierra ventures",
+                           firmname=="skadden arps slate meagher & flom llp" ~ "skadden arps slate meagher & flom",
+                           firmname=="skadden arps slate meagher and flom" ~ "skadden arps slate meagher & flom",
+                           firmname=="tufts university school of medicine" ~ "tufts university",
+                           firmname=="ubs financial services" ~ "ubs",
+                           firmname=="uc berkeley school of law" ~ "university of california",
+                           firmname=="unc student" ~ "unc",
+                           firmname=="university of california berkeley" ~ "university of california",
+                           firmname=="university of florida student body president" ~ "niversity of florida",
+                           firmname=="university of north carolinachapel hill" ~ "unc",
+                           firmname=="university of north carolina chapel hill" ~ "unc",
+                           firmname=="u of texas" ~ "university of texas",
+                           firmname=="usc schwarzenegger institute" ~ "usc",
+                           firmname=="usf college of medicine" ~ "university of south florida",
+                           firmname=="usf student body president" ~ "university of south florida",
+                           firmname=="washington university in st louis" ~ "washington university",
+                           firmname=="washington university school of medicine" ~ "washington university",
+                           firmname=="wells fargo intermountain banking" ~ "wells fargo",
+                           firmname=="wilmer cutler pickering hale and dorr llp" ~ "wilmer cutler pickering hale",
+                           firmname=="abc news" ~ "abc",
+                           firmname=="and chief patient officer merck & co" ~ "merck & co",
+                           firmname=="senior  of marketing merck & co" ~ "merck & co",
+                           firmname=="attorney eckert seamans cherin & mellott" ~ "eckert seamans cherin & mellott",
+                           firmname=="attorney perez & bombelyn pc attorneys at law:" ~ "perez & bombelyn",
+                           firmname=="attorneypartner willia& connolly llp" ~ "willia& connolly llp",
+                           firmname=="bank of new york mellon" ~ "bank of new york",
+                           firmname=="berkley president" ~ "university of california",
+                           firmname=="bloomberg media group" ~ "bloomberg",
+                           firmname=="bny mellon" ~ "bank of new york",
+                           firmname=="board president and  pepco holdings" ~ "pepco holdings",
+                           firmname=="boeing" ~ "boeing company",
+                           firmname=="cbs entertainment" ~ "cbs",
+                           firmname=="cbs news" ~ "cbs",
+                           firmname=="ch2mhill" ~ "ch2m hill",
+                           firmname=="chevron technology ventures" ~ "chevron",
+                           firmname=="chevron chemical co" ~ "chevron",
+                           firmname=="chief human resources officer hilton worldwide" ~ "hilton",
+                           firmname=="dean harvard medical school" ~ "harvard",
+                           firmname=="department of psychology st john's university" ~ "st john's university",
+                           firmname=="in chief mcgraw hill higher education" ~ "mcgraw hill higher education",
+                           firmname=="emory university school of law" ~ "emory university",
+                           firmname=="espn/pti" ~ "espn",
+                           firmname=="evercore's technology" ~ "evercore partners",
+                           firmname=="florida state university student" ~ "florida state university",
+                           firmname=="former president/ verizon wireless" ~ "verizon",
+                           firmname=="fox business network" ~ "fox",
+                           firmname=="gavea investimentos" ~ "gavea investments",
+                           firmname=="graduate assistant pennsylvania state universi" ~ "pennsylvania state university",
+                           firmname=="graduate student duke university" ~ "duke university",
+                           firmname=="harvard university" ~ "harvard",
+                           firmname=="head of public affairs at glg gerson lehrman group" ~ "gerson lehrman group",
+                           firmname=="holiday inns embassy suites sheraton hotels and outrigger hotels and resorts" ~ "holiday inns",
+                           firmname=="human resources nova biomedical corp" ~ "nova biomedical corp",
+                           firmname=="jcpenney stores catalogue and internet" ~ "j c penney company",
+                           firmname=="john hopkins" ~ "johns hopkins university",
+                           firmname=="johnson & johnson corporate" ~ "johnson & johnson",
+                           firmname=="lockheed martin information syste& global services" ~ "lockheed martin",
+                           firmname=="new york university's institute of fine arts" ~ "new york university",
+                           firmname=="notre dame's department of art art history and des" ~ "university of notre dame",
+                           firmname=="notre dame" ~ "university of notre dame",
+                           firmname=="pennsylvania university" ~ "university of pennsylvania",
+                           firmname=="senior advisor mckinsey & company" ~ "mckinsey & company",
+                           firmname=="senior  of marketing merck & co" ~ "merck & co",
+                           firmname=="senior premium care and customer loyalty at&t entertainment group" ~ "at&t",
+                           firmname=="senior advisor patomak global partners; klc consul" ~ "patomak global partners",
+                           firmname=="senior special correspondent fortune magazine" ~ "fortune magazine",
+                           firmname=="at&t services" ~ "at&t",
+                           firmname=="uh mānoa" ~ "university of hawaiʻi",
+                           firmname=="university of tennessee at martin" ~ "university of tennessee",
+                           firmname=="university of massachusetts dartmouth" ~ "university of massachusetts",
+                           firmname=="university of massachusetts lowell" ~ "university of massachusetts",
+                           firmname=="university of texas at austin" ~ "university of texas",
+                           firmname=="university of southern california" ~ "usc",
+                           firmname=="ut president" ~ "university of texas",
+                           firmname=="vice agricultural banking officer clearfield bank & trust" ~ "clearfield bank",
+                           firmname=="vice man jeffries & company" ~ "jeffries & company",
+                           firmname=="lecturer eecs case western reserve university; and  hexagram now aclara rf technologies" ~ "case western reserve university",
+                           firmname=="national university of ireland galway" ~ "national university",
+                           firmname=="professor of law tsinghua university law school" ~ "tsinghua university",
+                           firmname=="University of California-Berkeley" ~ "university of california",
+                           firmname=="University of Hawaii at Manoa" ~ "university of hawaiʻi",
+                           firmname=="University of Wisconsin-Madison" ~ "university of wisconsin-madison",
+                           firmname=="Duke University" ~ "duke university",
+                           firmname=="Florida State University" ~ "florida state university",
+                           firmname=="provost university of notre dame" ~ "university of notre dame",
+                           firmname=="University of North Carolina at Chapel Hill" ~ "unc",
+                           firmname=="Princeton University" ~ "princeton",
+                           firmname=="Purdue University-Main Campus" ~ "purdue university",
+                           firmname=="University of Florida" ~ "university of florida",
+                           firmname=="University of Maryland-College Park" ~ "university of maryland",
+                           firmname=="University of South Florida-Main Campus" ~ "university of south florida",
+                           firmname=="abc news medical contributor" ~ "abc",
+                           firmname=="abc's" ~ "abc",
+                           firmname=="allen & company'" ~ "allen & company",
+                           firmname=="alston and bird" ~ "alston & bird",
+                           firmname=="american financial group" ~ "american financial",
+                           firmname=="and chief marketing officer cisco systems board member of public and private companies and nonprofit organizations" ~ "cisco systems",
+                           firmname=="cisco" ~ "cisco systems",
+                           firmname=="and chief strategy officer nypro" ~ "nypro",                           
+                           firmname=="and coowner of slane company ltd" ~ "slane",
+                           firmname=="and man salesforcecom" ~ "salesforcecom",
+                           firmname=="and shareholder campbell campbell edwards & conroy pc boston" ~ "campbell",
+                           firmname=="campbell soup company" ~ "campbell",
+                           firmname==" aerospace" ~ "aerospace",
+                           firmname==" ezstorage" ~ "ezstorage",
+                           firmname==" pennsylvania heart group" ~ "pennsylvania heart group",
+                           firmname=="and vice man remedy intelligent staffing" ~ "remedy intelligent staffing",
+                           firmname=="at kearney" ~ "kearney",
+                           firmname=="at morris nichols arsht & tunnell" ~ "morris nichols arsht & tunnell",
+                           firmname=="at tallahassee memorial hospital" ~ "tallahassee memorial hospital",
+                           firmname=="at&t corp" ~ "at&t",
+                           firmname=="at&t missouri" ~ "at&t",
+                           firmname=="attorney post acute medical" ~ "post acute medical",
+                           firmname=="attorney zion tarleton & siskin pc" ~ "zion tarleton & siskin",
+                           firmname=="attorney/blue stephens & fellers" ~ "blue stephens & fellers",
+                           firmname=="attorneywillia& connolly" ~ "willia & connolly",
+                           firmname=="baxter international" ~ "baxter",
+                           firmname=="bbc worldwide north america" ~ "bbc",
+                           firmname=="bear stearns companies" ~ "bear stearns",
+                           firmname=="becton dickinson and company" ~ "becton & dickinson company",
+                           firmname=="ernst & young" ~ "ey",
+                           firmname=="exoxn mobil" ~ "exxon mobil",
+                           firmname=="general electrics" ~ "general electric",
+                           firmname=="graduate pennsylvania state university" ~ "pennsylvania state university",
+                           firmname=="Indiana University-Bloomington" ~ "indiana university",
+                           firmname=="law clerk ropes & gray" ~ "ropes & gray",
+                           firmname=="law office of behm & behm" ~ "behm & behm",
+                           firmname=="of athletics at msu" ~ "michigan state university",
+                           firmname=="of counsel mintz levin ml strategies" ~ "mintz levin ml strategies",
+                           firmname=="practice group leader choate hall & stewart" ~ "choate hall & stewart",
+                           firmname=="senior lecturer harvard business school emeritus mckinsey & company" ~ "mckinsey & company",
+                           firmname=="t rowe price associates" ~ "t rowe price",
+                           firmname=="rowe price group" ~ "t rowe price",
+                           firmname=="tata sons tata industries tata motors tata steel and tata chemicals" ~ "tata sons",
+                           firmname=="University of Iowa" ~ "university of iowa",
+                           firmname=="usa today abc news cnn" ~ "abc",
+                           firmname=="vice nursing and system chief nurse cedarssinai medical center" ~ "cedarssinai medical center",
+                           firmname=="wcau nbc 10 news" ~ "nbc",
+                           firmname=="wealth management janney montgomery scott" ~ "janney montgomery scott",
+                           firmname=="caltech" ~ "california institute of technology",
+                           firmname=="Carnegie Mellon University" ~ "carnegie mellon",
+                           firmname=="charles r schwab corporation" ~ "charles schwab",
+                           firmname=="citigroup global markets" ~ "citi group",
+                           firmname=="cocacola" ~ "cocacola company",
+                           firmname=="coca cola bottling works of tullahoma" ~ "cocacola company",
+                           firmname=="and person miriam and sheldon g adelson clinic drug abuse treatment and research" ~ "miriam and sheldon g adelson clinic",
+                           firmname=="banc one" ~ "jp morgan",
+                           firmname=="barnes & noble college booksellers" ~ "barnes & noble",
+                           firmname=="berkeley" ~ "university of california",
+                           firmname=="berkley" ~ "university of california",
+                           firmname=="w r berkley" ~ "wr berkley",
+                           firmname=="board of j&j industries" ~ "j&j industries",
+                           firmname=="business development of smartbank pigeon forge" ~ "smartbank",
+                           firmname=="capital group" ~ "capital group companies",
+                           firmname=="Carnegie Mellon University" ~ "carnegie mellon",
+                           firmname=="chief development officer buffalo sabres" ~ "buffalo sabres",
+                           firmname=="cook inlet region" ~ "cook inlet",
+                           firmname=="cook inlet tribal council citc" ~ "cook inlet",
+                           firmname=="cornell lab of ornithology" ~ "cornell university",
+                           firmname=="dartmouth professor of biological sciences" ~ "dartmouth college",
+                           firmname=="deloitte tax" ~ "deloitte",
+                           firmname=="drexel university school of public health" ~ "drexel university",
+                           firmname=="dupont" ~ "dupont company",
+                           firmname=="eagle brands sales major brands" ~ "",
+                           firmname=="eastman kodak company" ~ "eastman",
+                           firmname=="edison mission energy" ~ "edison international",
+                           firmname=="exxonmobil production company" ~ "exxon mobil",
+                           firmname=="finance mit" ~ "mit",
+                           firmname=="foley hoag and eliot" ~ "foley hoag",
+                           firmname=="foley hoag boston" ~ "foley hoag",
+                           firmname=="fox filmed entertainment" ~ "fox",
+                           firmname=="general electrics" ~ "general electric",
+                           firmname=="general motors dealer" ~ "general motors",
+                           firmname=="gleacher & partners" ~ "gleacher partners",
+                           firmname=="gleacher and company" ~ "gleacher partners",
+                           firmname=="glenmede trust company" ~ "glenmede",
+                           firmname=="harvard business school" ~ "harvard",
+                           firmname=="harvard graduate school of education" ~ "harvard",
+                           firmname=="hewlettpackard co" ~ "hewlett packard",
+                           firmname=="hunton & williallp" ~ "hunton & williams",
+                           firmname=="ibm global public sector" ~ "ibm",
+                           firmname=="ibm world trade" ~ "ibm",
+                           firmname=="indiana university bloomington" ~ "indiana university",
+                           firmname=="intel investments" ~ "intel",
+                           firmname=="interim cornell university" ~ "cornell university",
+                           firmname=="invesco" ~ "invesco capital management",
+                           firmname=="jeffries & company" ~ "jefferies group",
+                           firmname=="jones day reavis & pogue" ~ "jones day",
+                           firmname=="kirkland and ellis" ~ "kirkland & ellis",
+                           firmname=="kpmg international" ~ "kpmg",
+                           firmname=="kraft group" ~ "kraft",
+                           firmname=="lazard asset management" ~ "lazard",
+                           firmname=="loews hotels" ~ "loews",
+                           firmname=="marketing manager e&j gallo winery" ~ "e&j gallo winery",
+                           firmname=="mckinsey and company" ~ "mckinsey & company",
+                           firmname=="mckinsey's" ~ "mckinsey & company",
+                           firmname=="mellon financial" ~ "mellon bank",
+                           firmname=="merill lynch investment banking" ~ "merrill lynch",
+                           firmname=="mintz levin ml strategies" ~ "mintz levin cohn ferris glovsky and popeo pc",
+                           firmname=="mit admin" ~ "mit",
+                           firmname=="motorola ventures" ~ "motorola",
+                           firmname=="motorola solutions" ~ "motorola",
+                           firmname=="nasa johnson space center" ~ "nasa",
+                           firmname=="nasa's chief scientist" ~ "nasa",
+                           firmname=="nba's chicago bulls" ~ "nba",
+                           firmname=="nestlé purina petcare company" ~ "nestle",
+                           firmname=="nikeorporated" ~ "nike",
+                           firmname=="northern trust company" ~ "northern trust",
+                           firmname=="nyu" ~ "new york university",
+                           firmname=="oa newton & son co" ~ "oa newton",
+                           firmname=="of american financial group" ~ "american financial group",
+                           firmname=="of center public leadership kennedy school of government" ~ "harvard",
+                           firmname=="of administrative and personnel services leap academy university charter school" ~ "leap academy university charter school",
+                           firmname=="of counsel marcus brody ford kessler & sahner" ~ "marcus brody ford kessler & sahner",
+                           firmname=="officer johnson publishing company" ~ "johnson publishing company",
+                           firmname=="of tennessee commission on higher education" ~ "tennessee commission on higher education",
+                           firmname=="of planning state of tennessee" ~ "state of tennessee",
+                           firmname=="olayan america" ~ "olayan",
+                           firmname=="olayan financing company" ~ "olayan",
+                           firmname=="president/governor los angeles lakers" ~ "los angeles lakers",
+                           firmname=="price waterhouse" ~ "pricewaterhousecoopers",
+                           firmname=="procter and gamble" ~ "procter & gamble",
+                           firmname=="quarles and brady's madison office" ~ "quarles & brady",
+                           firmname=="raytheon company" ~ "raytheon",
+                           firmname=="senior finance and operations/treasurer emeritus pennsylvania state university" ~ "pennsylvania state university",
+                           firmname=="senior jones day" ~ "jones day",
+                           firmname=="senior named lang xifaras & bullard" ~ "lang xifaras & bullard",
+                           firmname=="senior vice gregorian university foundation" ~ "gregorian university foundation",
+                           firmname=="senior vp phillips petroleum/conoco phillips doctorate from mit" ~ "phillips petroleum",
+                           firmname=="special projects analyst accenture" ~ "accenture",
+                           firmname=="staples business advantage" ~ "staples",
+                           firmname=="texas a&m university alabama" ~ "texas a&m",
+                           firmname=="tribune publishing company" ~ "tribune company",
+                           firmname=="ubs wealth management" ~ "ubs",
+                           firmname=="uc davis" ~ "university of california",
+                           firmname=="uc irvine" ~ "university of california",
+                           firmname=="ucla" ~ "university of california",
+                           firmname=="uh manoa college of tropical agriculture and human resources" ~ "university of hawai'i",
+                           firmname=="uh manoa's college of tropical agriculture and human resources" ~ "university of hawai'i",
+                           firmname=="university of hawaiʻi" ~ "university of hawai'i",
+                           firmname=="umich" ~ "university of michigan",
+                           firmname=="unc school of dentistry" ~ "unc",
+                           firmname=="underpennsylvania state university" ~ "pennsylvania state university",
+                           firmname=="united auto workers 838" ~ "united auto workers",
+                           firmname=="university of kentucky college of dentistry" ~ "university of kentucky",
+                           firmname=="university of massachusetts boston" ~ "university of massachusetts",
+                           firmname=="university of nebraska medical center" ~ "university of nebraska",
+                           firmname=="University of Utah" ~ "university of utah",
+                           firmname=="university of wisconsin" ~ "university of wisconsin-madison",
+                           firmname=="university relations at cornell university" ~ "cornell university",
+                           firmname=="us sales ford and lincoln ford motor company" ~ "ford motor",
+                           firmname=="vice dupont" ~ "dupont company",
+                           firmname=="vice global & strategic policy aol time warner" ~ "time warner",
+                           firmname=="vice salem investment counselors" ~ "salem investment counselors",
+                           firmname=="vice technology at honeywell specialty materials" ~ "honeywell specialty materials",
+                           firmname=="weill cornell university medical center" ~ "cornell university",
+                           firmname=="weill medical college of cornell university" ~ "cornell university",
+                           firmname=="xerox global services" ~ "xerox",
+                           firmname=="yale law school" ~ "yale university",
+                           firmname=="yale school of medicine" ~ "yale university",
+                           firmname=="yalenus college" ~ "yale university",
+                           firmname=="commercial business group xerox" ~ "xerox",
+                           firmname=="alfred lerner college of business and economics" ~ "university of delaware",
+                           TRUE ~ firmname)) %>% 
+  mutate(firmname = ifelse(firmname=="", NA, firmname)) %>% 
+  mutate(firmname = ifelse(firmname=="university", institutionname, firmname))
+```
+
+
+
+Add missing industry descriptions
+```{r}
+board_members_updated <- board_members %>% 
+  mutate(industry_code = case_when(firmname == "morris nichols arsht & tunnell" ~ 4,
+                                   firmname == "conectiv" ~ 4,
+                                   firmname == "teco energy" ~ 4,
+                                   firmname == "willis chevrolet" ~ 4,
+                                   firmname == "tyto life" ~ 4,
+                                   firmname == "burton investment holding" ~ 5,
+                                   firmname == "delaware technical and community college" ~ 1,
+                                   firmname == "arlington capital" ~ 5,
+                                   firmname == "state farm insurance and financial" ~ 5,
+                                   firmname == "broad and cassel" ~ 4,
+                                   firmname == "marketing" ~ 4,
+                                   firmname == "north scott community school district" ~ 1,
+                                   firmname == "anseco group" ~ 4,
+                                   firmname == "haggard parks haggard & bologna pa" ~ 4,
+                                   firmname == "iowa department of human rights" ~ 2,
+                                   firmname == "new york republican party" ~ 2,
+                                   firmname == "ra fischer co" ~ 4,
+                                   firmname == "alfonso architects" ~ 4,
+                                   firmname == "bloom consulting" ~ 4,
+                                   firmname == "montgomery mccracken walker & rhoads" ~ 4,
+                                   firmname == "new york state comptroller and new york state senator" ~ 2,
+                                   firmname == "pantinbeber silverstein public relations" ~ 4,
+                                   firmname == "waste management" ~ 4,
+                                   firmname == "alliance mortgage co" ~ 5,
+                                   firmname == "hamiltonryker company" ~ 4,
+                                   firmname == "mflp" ~ 4,
+                                   firmname == "northpark development company" ~ 5,
+                                   firmname == "backer spielvogel bates worldwide" ~ 4,
+                                   firmname == "delaware river and bay authority" ~ 2,
+                                   firmname == "hill and knowlton" ~ 4,
+                                   firmname == "alrod enterprises" ~ 4,
+                                   firmname == "antiques dealer" ~ 4,
+                                   firmname == "aspro" ~ 4,
+                                   firmname == "atlantic coast management" ~ 4,
+                                   firmname == "attorney in private practice" ~ 4,
+                                   firmname == "avalon health care" ~ 4,
+                                   firmname == "aventine renewable energy holdings" ~ 4,
+                                   firmname == "bags" ~ 4,
+                                   firmname == "barnett bolt kirkwood long and koche" ~ 4,
+                                   firmname == "barry wehmiller" ~ 4,
+                                   firmname == "bayhealth" ~ 1,
+                                   firmname == "belluck & fox" ~ 4,
+                                   firmname == "biotek remedys" ~ 4,
+                                   firmname == "blue cross" ~ 5,
+                                   firmname == "brandon construction company" ~ 4,
+                                   firmname == "broad and cassel" ~ 4,
+                                   firmname == "burger king corp" ~ 4,
+                                   firmname == "chriscraft industries" ~ 4,
+                                   firmname == "cma" ~ 4,
+                                   firmname == "college of american pathologists" ~ 1,
+                                   firmname == "committee on special education at buffalo board of education" ~ 2,
+                                   firmname == "community work" ~ 3,
+                                   firmname == "conectiv" ~ 4,
+                                   firmname == "cooper capital" ~ 5,
+                                   firmname == "cunningham group" ~ 4,
+                                   firmname == "daiichi sankyo" ~ 4,
+                                   firmname == "daily tribute and vision iowa fund" ~ 2,
+                                   firmname == "dannemann fabric locations" ~ 4,
+                                   firmname == "davis county attourney" ~ 4,
+                                   firmname == "delaware department of education in dov" ~ 2,
+                                   firmname == "delaware river and bay authority" ~ 2,
+                                   firmname == "delaware state fair" ~ 2,
+                                   firmname == "delaware technical and community college" ~ 1,
+                                   firmname == "deputy commissionerdivision of temporary and disability assistance" ~ 2,
+                                   firmname == "deseret news publishing company" ~ 4,
+                                   firmname == "dogfish head craft brewery" ~ 4,
+                                   firmname == "dollar tree stores" ~ 4,
+                                   firmname == "empire solutions" ~ 4,
+                                   firmname == "endo pharmaceuticals" ~ 4,
+                                   firmname == "entral florida racing club orange cup regatta" ~ 4,
+                                   firmname == "era mining machinery" ~ 4,
+                                   firmname == "eye surgeon associates" ~ 1,
+                                   firmname == "farmer and farm bureau president" ~ 4,
+                                   firmname == "first niagara financial group" ~ 5,
+                                   firmname == "florida house of representatives" ~ 2,
+                                   firmname == "friedman kaplan seiler & adelman" ~ 4,
+                                   firmname == "gadsden technical institute" ~ 1,
+                                   firmname == "gartner" ~ 4,
+                                   firmname == "gary l crocker innovation & design lab" ~ 4,
+                                   firmname == "genesis companies" ~ 5,
+                                   firmname == "geraghty dougherty & edwards" ~ 4,
+                                   firmname == "gerson lehrman group" ~ 5,
+                                   firmname == "goldener hirsch inn" ~ 4,
+                                   firmname == "govenor of state of delaware" ~ 2,
+                                   firmname == "grant & eisenhofer pa" ~ 4,
+                                   firmname == "great priaire aea" ~ 1,
+                                   firmname == "greene county board of health" ~ 2,
+                                   firmname == "hall perrine foundation" ~ 3,
+                                   firmname == "hamiltonryker company" ~ 4,
+                                   firmname == "hancock estabrook" ~ 4,
+                                   firmname == "harrison rivard duncan & buzzett" ~ 4,
+                                   firmname == "hawkeye energy holdings heartland pork enterprises" ~ 4,
+                                   firmname == "health management associates" ~ 4,
+                                   firmname == "heavener company" ~ 4,
+                                   firmname == "ibi group" ~ 4,
+                                   firmname == "ic group" ~ 4,
+                                   firmname == "intermountain healthcare" ~ 1,
+                                   firmname == "intertech group" ~ 4,
+                                   firmname == "intrepid learning solutions" ~ 4,
+                                   firmname == "iowa department of human rights" ~ 2,
+                                   firmname == "iowa workforce development" ~ 2,
+                                   firmname == "jack graham" ~ 3,
+                                   firmname == "james madison institute" ~ 1,
+                                   firmname == "jan smith and company" ~ 4,
+                                   firmname == "jones waldo law" ~ 4,
+                                   firmname == "judge of superior court" ~ 2,
+                                   firmname == "kirton mcconkie" ~ 4,
+                                   firmname == "knowles marks & randolph" ~ 4,
+                                   firmname == "kreuzberg partners" ~ 4,
+                                   firmname == "l & jg stickley" ~ 4,
+                                   firmname == "latin american community center" ~ 3,
+                                   firmname == "lawrence d jacobs foundation" ~ 3,
+                                   firmname == "legon ponce and fodiman" ~ 4,
+                                   firmname == "linn mar community school district" ~ 1,
+                                   firmname == "mcfarlain & cassedy" ~ 4,
+                                   firmname == "mayor of buffalo" ~ 2,
+                                   firmname == "mercy cancer center" ~ 1,
+                                   firmname == "midcountry financial" ~ 5,
+                                   firmname == "moore mckibben goodman & lorenz" ~ 4,
+                                   firmname == "morris james" ~ 4,
+                                   firmname == "morvillo abramowitz grand iason & anello pc" ~ 4,
+                                   firmname == "national board professional teaching standards and campaign for fiscal equity" ~ 2,
+                                   firmname == "national wildlife federation" ~ 3,
+                                   firmname == "neurosurgeon public policy advocate" ~ 1,
+                                   firmname == "new york lieutenant governor" ~ 2,
+                                   firmname == "new york republican party" ~ 2,
+                                   firmname == "new york state comptroller and new york state senator" ~ 2,
+                                   firmname == "new york state government" ~ 2,
+                                   firmname == "new york state senate" ~ 2,
+                                   firmname == "new york state’s deputy secretary health" ~ 2,
+                                   firmname == "new york's 60th secretary of state" ~ 2,
+                                   firmname == "new yorkbased american soprano" ~ 6,
+                                   firmname == "north scott community school district" ~ 1,
+                                   firmname == "northpark development company" ~ 5,
+                                   firmname == "ntegrated marketing group" ~ 4,
+                                   firmname == "oa newton" ~ 4,
+                                   firmname == "onthank company" ~ 4,
+                                   firmname == "orthopaedic institute" ~ 1,
+                                   firmname == "pantinbeber silverstein public relations" ~ 4,
+                                   firmname == "parsons behle & latimer" ~ 4,
+                                   firmname == "pathway associates" ~ 3,
+                                   firmname == "personal injury attorney" ~ 4,
+                                   firmname == "philadelphia college of osteopathic medicine" ~ 1,
+                                   firmname == "polk county human services alliance" ~ 2,
+                                   firmname == "private legal practice" ~ 4,
+                                   firmname == "private medical practice" ~ 1,
+                                   firmname == "puglisi associates" ~ 5,
+                                   firmname == "pure fishing" ~ 4,
+                                   firmname == "quatro composites" ~ 4,
+                                   firmname == "queen emma land company" ~ 3,
+                                   firmname == "ra fischer co" ~ 4,
+                                   firmname == "rayonier terrapointe" ~ 5,
+                                   firmname == "reverant" ~ 3,
+                                   firmname == "saturn of gainesville" ~ 4,
+                                   firmname == "schell brothers" ~ 5,
+                                   firmname == "secretary of finance state of delaware" ~ 2,
+                                   firmname == "senator" ~ 2,
+                                   firmname == "shinn & company pa" ~ 4,
+                                   firmname == "shutts & bowen's real estate" ~ 5,
+                                   firmname == "smith ballard bradshaw and logan" ~ 4,
+                                   firmname == "sunshine gasoline distributors" ~ 4,
+                                   firmname == "tallahassee memorial hospital" ~ 1,
+                                   firmname == "tampa and st petersburg law firm" ~ 4,
+                                   firmname == "tampa bay buccaneers" ~ 4,
+                                   firmname == "tegna" ~ 4,
+                                   firmname == "tenet healthcare" ~ 4,
+                                   firmname == "town and country farms" ~ 4,
+                                   firmname == "trenam kemker" ~ 4,
+                                   firmname == "trieagle sales" ~ 4,
+                                   firmname == "united community banks" ~ 5,
+                                   firmname == "utah retirement systems" ~ 2,
+                                   firmname == "van diest family health clinic" ~ 1,
+                                   firmname == "vermeer" ~ 4,
+                                   firmname == "vox creative" ~ 4,
+                                   firmname == "w l gore & associates" ~ 4,
+                                   firmname == "warren merrick communications" ~ 4,
+                                   firmname == "washington capital" ~ 5,
+                                   firmname == "washington economics group" ~ 4,
+                                   firmname == "waterfall talf opportunity" ~ 5,
+                                   firmname == "waters capital partners ll" ~ 5,
+                                   firmname == "watson clinic" ~ 1,
+                                   firmname == "wetland partners" ~ 3,
+                                   firmname == "wilson sonsini goodrich & rosati" ~ 4,
+                                   firmname == "wl gore & associates" ~ 4,
+                                   firmname == "world trade bank" ~ 5,
+                                   firmname == "zimmerman advertising" ~ 4,
+                                   firmname == "attorney in private practice" ~ 4,
+                                   firmname == "community work" ~ 3,
+                                   firmname == "personal injury attorney" ~ 4,
+                                   TRUE ~ industry_code)) %>% 
+  mutate(financetype = case_when(firmname == "burton investment holding" ~ "Other finance",
+                                 firmname == "arlington capital" ~ "Private equity",
+                                 firmname == "state farm insurance and financial" ~ "Insurance",
+                                 firmname == "alliance mortgage co" ~ "Real estate",
+                                 firmname == "northpark development company" ~ "Real estate",
+                                 firmname == "blue cross" ~ "Insurance",
+                                 firmname == "cooper capital" ~ "Asset management",
+                                 firmname == "first niagara financial group" ~ "Commercial banking",
+                                 firmname == "genesis companies" ~ "Real estate",
+                                 firmname == "gerson lehrman group" ~ "Asset management",
+                                 firmname == "midcountry financial" ~ "Commercial banking",
+                                 firmname == "northpark development company" ~ "Real estate",
+                                 firmname == "puglisi associates" ~ "Financial planning",
+                                 firmname == "rayonier terrapointe" ~ "Real estate",
+                                 firmname == "schell brothers" ~ "Real estate",
+                                 firmname == "shutts & bowen's real estate" ~ "Real estate",
+                                 firmname == "united community banks" ~ "Commercial banking",
+                                 firmname == "washington capital" ~ "Financial planning",
+                                 firmname == "waterfall talf opportunity" ~ "Asset management",
+                                 firmname == "waters capital partners ll" ~ "Asset management",
+                                 firmname == "world trade bank" ~ "Commercial banking",
+                                 TRUE ~ financetype))
+
+# Correct incorrectly coded firms
+board_members_updated <- board_members_updated %>% 
+  mutate(industry_code = case_when(firmname == "abc" ~ 6,
+                                   firmname == "accenture" ~ 4,
+                                   firmname == "asurion" ~ 5,
+                                   firmname == "battery ventures" ~ 5,
+                                   firmname == "bessemer venture partners" ~ 5,
+                                   firmname == "california institute of technology" ~ 1,
+                                   firmname == "case western reserve university" ~ 1,
+                                   firmname == "cbs" ~ 6,
+                                   firmname == "cornell university" ~ 1,
+                                   firmname == "evercore partners" ~ 5,
+                                   firmname == "garden homes" ~ 5,
+                                   firmname == "georgetown university" ~ 1,
+                                   firmname == "goldman sachs" ~ 5,
+                                   firmname == "goodyear capital" ~ 5,
+                                   firmname == "guggenheim partners" ~ 5,
+                                   firmname == "harvard" ~ 1,
+                                   firmname == "kohlberg kravis roberts" ~ 5,
+                                   firmname == "macandrews & forbesorporated" ~ 5,
+                                   firmname == "nbc" ~ 6,
+                                   firmname == "nexus group" ~ 5,
+                                   firmname == "ogden cap properties" ~ 5,
+                                   firmname == "paulson & co" ~ 5,
+                                   firmname == "princeton" ~ 1,
+                                   firmname == "sierra ventures" ~ 5,
+                                   firmname == "silverstein properties" ~ 5,
+                                   firmname == "social worker" ~ 3,
+                                   firmname == "stanford university" ~ 1,
+                                   firmname == "supreme court justice" ~ 2,
+                                   firmname == "t rowe price" ~ 5,
+                                   firmname == "tpg" ~ 5,
+                                   firmname == "tufts university" ~ 1,
+                                   firmname == "united methodist church" ~ 3,
+                                   firmname == "university of california" ~ 1,
+                                   firmname == "usc" ~ 1,
+                                   firmname == "washington university" ~ 1,
+                                   firmname == "yale university" ~ 1,
+                                   firmname == "fox" ~ 6,
+                                   firmname == "agriculture" ~ 2,
+                                   firmname == "new york times" ~ 6,
+                                   firmname == "unc" ~ 1,
+                                   firmname == "greenwich associates" ~ 5,
+                                   firmname == "henry crown & company" ~ 5,
+                                   firmname == "loews" ~ 5,
+                                   firmname == "travelers" ~ 5,
+                                   firmname == "time warner" ~ 4,
+                                   firmname == "bessemer trust" ~ 5,
+                                   firmname == "merck" ~ 4,
+                                   firmname == "general electric" ~ 4,
+                                   firmname == "johnson & johnson" ~ 4,
+                                   firmname == "mit" ~ 1,
+                                   firmname == "aig" ~ 5,
+                                   firmname == "allen & company" ~ 5,
+                                   firmname == "american shared hospital services" ~ 1,
+                                   firmname == "bloomberg" ~ 5,
+                                   firmname == "california strategies" ~ 4,
+                                   firmname == "centerbridge partners" ~ 5,
+                                   firmname == "clark enterprises" ~ 5,
+                                   firmname == "cook inlet" ~ 3,
+                                   firmname == "debevoise & plimpton" ~ 4,
+                                   firmname == "dietrich foundation" ~ 3,
+                                   firmname == "educap" ~ 5,
+                                   firmname == "fd gallery" ~ 6,
+                                   firmname == "hbo" ~ 6,
+                                   firmname == "king & spalding" ~ 4,
+                                   firmname == "lnk partners" ~ 5,
+                                   firmname == "nasa" ~ 1,
+                                   firmname == "new york university" ~ 1,
+                                   firmname == "nike" ~ 4,
+                                   firmname == "olayan" ~ 5,
+                                   firmname == "pricewaterhousecoopers" ~ 4,
+                                   firmname == "prologis" ~ 5,
+                                   firmname == "superintendent" ~ 2,
+                                   firmname == "time" ~ 6,
+                                   firmname == "university of notre dame" ~ 1,
+                                   firmname == "warburg pincus" ~ 5,
+                                   firmname == "washington post" ~ 6,
+                                   firmname == "debevoise & plimpton" ~ 4,
+                                   firmname == "dietrich foundation" ~ 3,
+                                   firmname == "intel" ~ 4,
+                                   firmname == "king & spalding" ~ 4,
+                                   TRUE ~ industry_code)) %>% 
+  mutate(financetype = case_when(firmname == "asurion" ~ "Insurance",
+                                 firmname == "battery ventures" ~ "Venture capital",
+                                 firmname == "bessemer venture partners" ~ "Venture capital",
+                                 firmname == "evercore partners" ~ "Investment banking",
+                                 firmname == "garden homes" ~ "Real estate",
+                                 firmname == "goldman sachs" ~ "Investment banking",
+                                 firmname == "goodyear capital" ~ "Other finance",
+                                 firmname == "guggenheim partners" ~ "Investment banking",
+                                 firmname == "kohlberg kravis roberts" ~ "Private equity",
+                                 firmname == "macandrews & forbesorporated" ~ "Private equity",
+                                 firmname == "nexus group" ~ "Private equity",
+                                 firmname == "ogden cap properties" ~ "Real estate",
+                                 firmname == "paulson & co" ~ "Asset management",
+                                 firmname == "sierra ventures" ~ "Venture capital",
+                                 firmname == "silverstein properties" ~ "Real estate",
+                                 firmname == "t rowe price" ~ "Asset management",
+                                 firmname == "tpg" ~ "Private equity",
+                                 firmname == "greenwich associates" ~ "Financial planning",
+                                 firmname == "henry crown & company" ~ "Investment banking",
+                                 firmname == "loews" ~ "Other finance",
+                                 firmname == "travelers" ~ "Insurance",
+                                 firmname == "bessemer trust" ~ "Asset management",
+                                 firmname == "aig" ~ "Insurance",
+                                 firmname == "allen & company" ~ "Investment banking",
+                                 firmname == "bloomberg" ~ "Other finance",
+                                 firmname == "centerbridge partners" ~ "Private equity",
+                                 firmname == "clark enterprises" ~ "Private equity",
+                                 firmname == "educap" ~ "Other finance",
+                                 firmname == "lnk partners" ~ "Private equity",
+                                 firmname == "olayan" ~ "Other finance",
+                                 firmname == "prologis" ~ "Real estate",
+                                 firmname == "warburg pincus" ~ "Private equity",
+                                 TRUE ~ financetype)) %>% 
+  mutate(firmname = ifelse(name == "susan m mccue", "ONE Campaign", 
+                    ifelse(name == "judy steinhardt", "steinhardt partners", firmname)),
+         industry_code = ifelse(name == "susan m mccue", 3, 
+                         ifelse(name == "judy steinhardt", 5, industry_code)),
+         financetype = ifelse(name == "judy steinhardt","Hedge funds", financetype))
+```
+
+
+
+Add unique numbers to all commonly shared orgs
+```{r}
+board_members_updated <- board_members_updated %>% 
+  group_by(firstname, lastname) %>% 
+  mutate(unique_id = cur_group_id()) %>% 
+  ungroup() %>%
+  mutate(firmname = ifelse(str_detect(firmname, "doctor"), paste(firmname, unique_id) , firmname)) %>% 
+  mutate(firmname = ifelse(str_detect(firmname, "nonprofit"), paste(firmname, unique_id) , firmname)) %>% 
+  mutate(firmname = ifelse(str_detect(firmname, "attorney"), paste(firmname, unique_id) , firmname)) %>% 
+  mutate(firmname = ifelse(str_detect(firmname, "business"), paste(firmname, unique_id) , firmname)) %>% 
+  mutate(firmname = ifelse(str_detect(firmname, "writer"), paste(firmname, unique_id) , firmname)) %>% 
+  mutate(firmname = ifelse(str_detect(firmname, "politician"), paste(firmname, unique_id) , firmname)) %>%
+  mutate(firmname = ifelse(firmname=="philanthropist", paste(firmname, unique_id) , firmname)) %>% 
+  mutate(firmname = ifelse(firmname=="philanthropy", paste(firmname, unique_id) , firmname)) %>% 
+  mutate(firmname = ifelse(firmname=="social worker", paste(firmname, unique_id) , firmname)) %>% 
+  mutate(firmname = ifelse(firmname=="law", paste(firmname, unique_id) , firmname)) %>% 
+  mutate(firmname = ifelse(firmname=="foundations", paste(firmname, unique_id) , firmname)) %>% 
+  mutate(firmname = ifelse(firmname=="community leader", paste(firmname, unique_id) , firmname)) %>% 
+  mutate(firmname = ifelse(firmname=="community volunteer", paste(firmname, unique_id) , firmname)) %>% 
+  mutate(firmname = ifelse(firmname=="community work", paste(firmname, unique_id) , firmname)) %>% 
+  mutate(firmname = ifelse(firmname=="corporate", paste(firmname, unique_id) , firmname)) %>% 
+  mutate(firmname = ifelse(firmname=="lawyer", paste(firmname, unique_id) , firmname)) %>% 
+  mutate(firmname = ifelse(firmname=="dentist", paste(firmname, unique_id) , firmname)) %>% 
+  mutate(firmname = ifelse(firmname=="physician", paste(firmname, unique_id) , firmname)) %>%
+  mutate(firmname = ifelse(firmname=="educator", paste(firmname, unique_id) , firmname)) %>%
+  mutate(firmname = ifelse(firmname=="senator", paste(firmname, unique_id) , firmname)) %>%
+  mutate(firmname = ifelse(firmname=="farmer", paste(firmname, unique_id) , firmname)) %>%
+  mutate(firmname = ifelse(firmname=="scientist", paste(firmname, unique_id) , firmname)) %>%
+  mutate(firmname = ifelse(firmname=="governor", paste(firmname, unique_id) , firmname)) %>%
+  mutate(firmname = ifelse(firmname=="agriculture", paste(firmname, unique_id) , firmname)) %>%
+  mutate(firmname = ifelse(is.na(firmname), paste(firmname, unique_id) , firmname)) %>% 
+  mutate(firmname = ifelse(firmname=="certified public accountant", paste(firmname, unique_id) , firmname)) 
+```
+
+
+Coding breakdown:
+1 - Education, science, medicine (7 for Higher education)
+2 - Public sector
+3 - Non-profits, philanthropy
+4 - Non-FIRE private sector
+5 - FIRE private sector (1 for Finance, 2 for Real-Estate, 3 for Insurance)
+6 - Arts/Media
+
+
+Clean up industry descriptions
+```{r}
+board_members_updated <- board_members_updated %>%
+  mutate(industry_code = as.numeric(industry_code)) %>% 
+  mutate(industry_code = ifelse(is.na(industry_code) & firehjghered==7, 1,
+                         ifelse(is.na(industry_code) & firehjghered==1, 5,
+                         ifelse(is.na(industry_code) & firehjghered==2, 5,
+                         ifelse(is.na(industry_code) & firehjghered==3, 5, industry_code))))) %>% 
+  mutate(industry_code_description = case_when(industry_code==1 ~ "Education science medicine",
+                                               industry_code==2 ~ "Public sector",
+                                               industry_code==3 ~ "Non-profits/philanthropy",
+                                               industry_code==4 ~ "Non-financial business",
+                                               industry_code==5 ~ "FIRE",
+                                               industry_code==6 ~ "Arts/media")) %>% 
+  mutate(financetype = case_when(financetype == "hedge fund" ~ "Hedge funds",
+                                 financetype == "hedge funds" ~ "Hedge funds",
+                                 financetype == "asset manatement" ~ "Asset management",
+                                 financetype == "institutional investor" ~ "Asset management",
+                                 financetype == "asset management" ~ "Asset management",
+                                 financetype == "non-financial" ~ "Non-financial business",
+                                 financetype == "private equity" ~ "Private equity",
+                                 financetype == "real estate" ~ "Real estate",
+                                 financetype == "investment banking" ~ "Investment banking",
+                                 financetype == "venture capital" ~ "Venture capital",
+                                 financetype == "commercial banking" ~ "Commercial banking",
+                                 financetype == "other" ~ "Other finance",
+                                 financetype == "insurance" ~ "Insurance",
+                                 financetype == "financial planning" ~ "Financial planning",
+                                 TRUE ~ financetype)) %>% 
+  mutate(financetype = ifelse(financetype == "", NA, financetype)) %>% 
+  mutate(employer_type = financetype) %>% 
+  mutate(employer_type = ifelse(is.na(financetype) & industry_code != 5, industry_code_description,
+                         ifelse(industry_code == 1, industry_code_description,
+                         ifelse(industry_code == 2, industry_code_description,
+                         ifelse(industry_code == 3, industry_code_description,
+                         ifelse(industry_code == 4, industry_code_description,
+                         ifelse(industry_code == 6, industry_code_description,
+                         ifelse(is.na(financetype) & industry_code == 5 & firehjghered == 3, "Insurance",
+                         ifelse(is.na(financetype) & industry_code == 5 & firehjghered == 2, "Real estate",
+                         ifelse(is.na(financetype) & industry_code == 5 & is.na(firehjghered), "Other finance",  
+                         ifelse(is.na(financetype) & industry_code == 5 & firehjghered == 1, "Other finance",  
+                         ifelse(financetype == "other" & firehjghered == 3, "Insurance",
+                         ifelse(financetype == "other" & firehjghered == 2, "Real estate",
+                                financetype))))))))))))) %>% 
+  mutate(employer_type_aggregated = employer_type) %>% 
+  mutate(employer_type_aggregated = 
+           case_when(employer_type_aggregated=="Hedge funds" ~ "PE and hedge funds",
+                     employer_type_aggregated=="Private equity" ~ "PE and hedge funds",
+                     employer_type_aggregated=="Venture capital" ~ "PE and hedge funds",
+                     employer_type_aggregated=="Asset management" ~ "Other finance",
+                     employer_type_aggregated=="Commercial banking" ~ "Other finance",
+                     employer_type_aggregated=="Financial planning" ~ "Other finance",
+                     employer_type_aggregated=="Insurance" ~ "Other finance",
+                     employer_type_aggregated=="Investment banking" ~ "Other finance",
+                     employer_type_aggregated=="Real estate" ~ "Other finance",
+                     employer_type_aggregated=="Other finance" ~ "Other finance",
+                     employer_type_aggregated=="Arts/media" ~ "Non-financial business",
+                     TRUE ~ employer_type_aggregated)) %>% 
+  mutate(employer_type = ifelse(firmname=="wr berkley", "Insurance", employer_type)) 
+```
+
+
+If employer_type is missing, add info from companies with the same firm name
+```{r}
+organizations_list_known <- board_members_updated %>% 
+  group_by(firmname, employer_type_aggregated) %>% 
+  summarise(count = n()) %>% 
+  arrange(desc(count)) %>% 
+  filter(!is.na(employer_type_aggregated)) %>% 
+  group_by(firmname) %>% 
+  mutate(duplicates = n()) %>% 
+  filter(duplicates == 1) %>% 
+  rename(employer_type_aggregated_known = employer_type_aggregated) %>% 
+  select(firmname, employer_type_aggregated_known)
+
+board_members_updated <- board_members_updated %>% 
+  left_join(organizations_list_known, by = "firmname") %>% 
+  mutate(employer_type_aggregated = ifelse(is.na(employer_type_aggregated), employer_type_aggregated_known, employer_type_aggregated)) %>% 
+  mutate(employer_type = ifelse(is.na(employer_type) & employer_type_aggregated!="PE and hedge funds", employer_type_aggregated, employer_type))
+```
+
+
+
+Check how many firms have multiple industry descriptions -> make every firm name/industry combination have unique names
+```{r}
+duplicates <- board_members_updated %>% 
+  select(firmname, employer_type_aggregated) %>% 
+  unique() %>% 
+  group_by(firmname) %>% 
+  mutate(dup = n()) %>% 
+  mutate(employer_type_new = case_when(employer_type_aggregated=="PE and hedge funds" ~ "alt finance",
+                                       employer_type_aggregated=="Non-financial business" ~ "nonfinance",
+                                       employer_type_aggregated=="Other finance" ~ "other finance",
+                                       TRUE ~ employer_type_aggregated)) %>% 
+  mutate(firmname_new = if_else(dup > 1, paste(firmname,employer_type_new), firmname)) %>% 
+  select(-employer_type_new, - dup)
+
+
+# merge with the main document
+board_members_updated <- board_members_updated %>% 
+  left_join(duplicates, by = c("firmname", "employer_type_aggregated"))
+```
+
+
+
+Network at the level of firms: loop
+```{r}
+datalist = list()
+
+organization_charachteristics <- board_members_updated %>% 
+  filter(!is.na(institutionname)) %>% 
+  filter(!is.na(firmname_new)) %>% 
+  filter(publicprivate == "Private" | publicprivate == "Public") %>% 
+  filter(year > 2002) %>% 
+  select(firmname_new, employer_type_aggregated) %>% 
+  unique() %>% 
+  rename(Group = employer_type_aggregated,
+         Id = firmname_new)
+
+
+for (i in 2003:2017){
+  
+org_list <- board_members_updated %>% 
+  filter(year > 2002) %>% 
+  filter(!is.na(institutionname)) %>% 
+  filter(!is.na(firmname_new)) %>% 
+  filter(publicprivate == "Private" | publicprivate == "Public") %>% 
+  filter(year == i) %>% 
+  group_by(firmname_new, institutionname) %>% 
+  summarise(weight = n()) %>% 
+  arrange(desc(weight)) %>% 
+  rename(from = firmname_new) %>% 
+  rename(to = institutionname)
+
+organizations <- as.matrix(get.adjacency(graph_from_data_frame(org_list, directed=TRUE)))
+
+organizations <- organizations %*% t(organizations)
+diag(organizations) <- 0
+
+organizations <- as.matrix(organizations,
+                           mode = "undirected",
+                           weighted = TRUE)
+
+g <- graph.adjacency(organizations)
+
+V(g)$weighted_degree <- graph.strength(g)       # Weighted degree
+V(g)$eig <- eigen_centrality(g)$vector          # Eigenvector centrality
+V(g)$hubs <- hub.score(g)$vector                # "Hub" centrality
+V(g)$authorities <- authority.score(g)$vector   # "Authority" centrality
+V(g)$betweenness <- betweenness(g)              # Vertex betweenness centrality
+
+
+centrality <- data.frame(Id   = V(g)$name,
+                         strength = V(g)$weighted_degree,
+                         betweenness = V(g)$betweenness,
+                         eigenvector = V(g)$eig,
+                         hubs = V(g)$hubs,
+                         authorities = V(g)$authorities)
+
+  centrality <- centrality %>% 
+  left_join(organization_charachteristics, by = "Id") %>% 
+  mutate(year = as.numeric(i))
+
+  datalist[[i]] <- centrality # add it to your list
+}
+
+centrality_combined = do.call(bind_rows, datalist)
+
+centrality_combined <- centrality_combined %>% 
+  filter(strength>0)
+```
+
+
+Add centrality measures to the board_members_updated dataset
+```{r}
+board_members_updated <- board_members_updated %>% 
+  left_join(centrality_combined, by = c("firmname_new" = "Id", "year")) 
+```
+
+
+
+Export board members stata file
+```{r}
+write_dta(board_members_updated, "board_members_all_long20220501.dta")
+#board_members_updated <- read_dta("board_members_all_long20220501.dta")
+```
+
+
+Calculate centrality measures for universities
+```{r}
+university_centrality <- board_members_updated %>% 
+  mutate(alt_finance = ifelse(employer_type_aggregated=="PE and hedge funds",1,0)) %>% 
+  group_by(unitid, institutionname, publicprivate, acceptrate, year) %>% 
+  summarise(alt_finance_pct = sum(alt_finance)/n(),
+            across(strength:authorities, mean)) %>% 
+  filter(!is.na(strength))
+
+write_dta(university_centrality, "university_centrality.dta")
+
+my.formula <- y ~ x
+
+university_weighted_degree <- university_centrality %>% 
+  ggplot(aes(x = acceptrate, y = strength, color = publicprivate)) +
+  geom_point() +
+  geom_smooth(aes(color=publicprivate), method="lm", se=FALSE,formula = my.formula) +
+  stat_poly_eq(formula = my.formula, 
+               aes(label = paste(..eq.label.., ..rr.label.., sep = "~~~")), parse = TRUE) + 
+  scale_colour_manual(values = c("#7570B3","#D16103")) +
+  facet_wrap(~year) + 
+  scale_y_log10() +
+  labs(x = "Undergraduate acceptance rate", 
+       y = "Weighted degree (log 10)",
+       colour="School type",
+       title = "Average weighted degree of universities according to their prestige") +
+  theme_light()
+
+ggsave("university_weighted_degree.png", plot=university_weighted_degree, device="png", width = 14, height = 11)
+
+university_alt_finance <- university_centrality %>% 
+  ggplot(aes(x = strength, y = alt_finance_pct, color = publicprivate)) +
+  geom_point() +
+  geom_smooth(aes(color=publicprivate), method="lm", se=FALSE,formula = my.formula) +
+  stat_poly_eq(formula = my.formula, 
+               aes(label = paste(..eq.label.., ..rr.label.., sep = "~~~")), parse = TRUE) + 
+  scale_colour_manual(values = c("#7570B3","#D16103")) +
+  facet_wrap(~year) + 
+  labs(x = "Universities' average weighted degree", 
+       y = "Percent of board members from PE and hedge funds",
+       colour="School type",
+       title = "Percent of board members from PE and hedge funds and universities' connectedness") +
+  theme_light()
+
+ggsave("university_alt_finance.png", plot=university_alt_finance, device="png", width = 14, height = 11)
+
+```
+
+
+
+Summary statistics
+```{r}
+centrality_group <- centrality_combined %>% 
+  group_by(Group, year) %>% 
+  summarise(across(strength:authorities, mean))
+```
+
+
+
+## Make boxplots for centrality measures
+
+
+Calculate PE and hedge funds means for centrality measures
+```{r}
+altfinance_centrality_2003 <- centrality_combined %>% 
+  filter(Group == "PE and hedge funds") %>%
+  filter(year == 2003) %>% 
+  group_by(year) %>% 
+  summarise(strength_mean = mean(strength),
+            strength_median = median(strength),
+            eigenvector_mean = mean(eigenvector),
+            eigenvector_median = median(eigenvector),
+            betweenness_mean = mean(betweenness),
+            betweenness_median = median(betweenness))
+
+altfinance_centrality_2017 <- centrality_combined %>% 
+  filter(Group == "PE and hedge funds") %>%
+  filter(year == 2017) %>% 
+  group_by(year) %>% 
+  summarise(strength_mean = mean(strength),
+            strength_median = median(strength),
+            eigenvector_mean = mean(eigenvector),
+            eigenvector_median = median(eigenvector),
+            betweenness_mean = mean(betweenness),
+            betweenness_median = median(betweenness))
+
+group_centrality_2003 <- centrality_combined %>% 
+  filter(year == 2003) %>% 
+  filter(!is.na(Group)) %>% 
+  group_by(year, Group) %>% 
+  summarise(strength_mean = mean(strength),
+            strength_median = median(strength),
+            eigenvector_mean = mean(eigenvector),
+            eigenvector_median = median(eigenvector),
+            betweenness_mean = mean(betweenness),
+            betweenness_median = median(betweenness))
+
+
+group_centrality_2017 <- centrality_combined %>% 
+  filter(year == 2017) %>% 
+  filter(!is.na(Group)) %>% 
+  group_by(year, Group) %>% 
+  summarise(strength_mean = mean(strength),
+            strength_median = median(strength),
+            eigenvector_mean = mean(eigenvector),
+            eigenvector_median = median(eigenvector),
+            betweenness_mean = mean(betweenness),
+            betweenness_median = median(betweenness))
+```
+
+
+
+Weighted degree
+```{r}
+compare_means(strength ~ Group,  data = centrality_combined, method = "t.test", paired = FALSE, group.by = "year")
+
+my_comparisons_2003 <- list(c("Other finance", "PE and hedge funds"), c("Education science medicine", "PE and hedge funds"),  c("Non-financial business", "PE and hedge funds"), c("Non-profits/philanthropy", "PE and hedge funds"), c("Public sector", "PE and hedge funds"))
+
+my_comparisons_2017 <- list(c("Other finance", "PE and hedge funds"),  c("Non-financial business", "PE and hedge funds"),  c("Non-profits/philanthropy", "PE and hedge funds"), c("Education science medicine", "PE and hedge funds"), c("Public sector", "PE and hedge funds"))
+
+group_centrality_2003$Group <- factor(group_centrality_2003$Group, levels = c("Public sector", "Education science medicine", "Non-profits/philanthropy", "Non-financial business", "Other finance", "PE and hedge funds"))
+
+group_centrality_2017$Group <- factor(group_centrality_2017$Group, levels = c("Public sector",  "Education science medicine", "Non-profits/philanthropy", "Non-financial business", "Other finance", "PE and hedge funds"))
+
+degree_2003 <- centrality_combined %>%
+  filter(!is.na(Group)) %>% 
+  filter(year == 2003) %>% 
+  ggplot(aes(x = reorder(Group, strength, fun = mean), y = strength , fill = Group)) +
+    #geom_violin(outlier.size = 0) +
+    geom_boxplot(color="black") +
+    geom_point(data = group_centrality_2003, aes(y = strength_mean, x = Group), shape = 5, color = "black", size = 2) +
+    geom_text(data = group_centrality_2003, aes(x = Group, label=paste0("Mean=",round(strength_mean,2))), y=log(2.7)) +
+    stat_compare_means(comparisons = my_comparisons_2003, label = "p.signif") +
+    stat_compare_means(method = "anova") +
+    geom_text(stat="count", aes(label=paste0("n=",..count..)), y=log(2.3)) +
+    geom_hline(data = altfinance_centrality_2003, aes(yintercept = strength_mean), 
+               color = "black", size = 0.25,linetype="dashed") +
+    scale_y_log10(labels=comma) +
+    labs(x = "Economic sectors", y = "Weighted degree (log 10)", 
+         title = "2003: Weighted degree of board members' organizations (public and private universities)") +
+    theme_light() +
+    theme(legend.position = "none") +
+    expand_limits(y = 8)
+
+degree_2017 <- centrality_combined %>%
+  filter(!is.na(Group)) %>% 
+  filter(year == 2017) %>% 
+  ggplot(aes(x = reorder(Group, strength, fun = mean), y = strength , fill = Group)) +
+    #geom_violin(outlier.size = 0) +
+    geom_boxplot(color="black") +
+    geom_point(data = group_centrality_2017, aes(y = strength_mean, x = Group), shape = 5, color = "black", size = 2) +
+    geom_text(data = group_centrality_2017, aes(x = Group, label=paste0("Mean=",round(strength_mean,2))), y=log(2.7)) +
+    stat_compare_means(comparisons = my_comparisons_2017, label = "p.signif") +
+    stat_compare_means(method = "anova") +
+    geom_text(stat="count", aes(label=paste0("n=",..count..)), y=log(2.3)) +
+    geom_hline(data = altfinance_centrality_2017, aes(yintercept = strength_mean), 
+               color = "black", size = 0.25,linetype="dashed") +
+    scale_y_log10(labels=comma) +
+    labs(x = "Economic sectors", y = "Weighted degree (log 10)", 
+         title = "2017: Weighted degree of board members' organizations (public and private universities)") +
+    theme_light() +
+    theme(legend.position = "none") +
+    expand_limits(y = 8)
+
+
+weighted_degree <- ggarrange(degree_2003, degree_2017,ncol = 1, nrow = 2)
+
+ggsave(weighted_degree, file = "weighted_degree.png", width = 11, height = 14)
+
+
+#ggsave("weighted_degree.png", plot = weighted_degree, device="png", width = 13, height = 8)
+```
+
+
+Eigenvector centrality
+```{r}
+compare_means(eigenvector ~ Group,  data = centrality_combined, method = "t.test", paired = FALSE, group.by = "year")
+
+my_comparisons_2003 <- list(c("Other finance", "PE and hedge funds"), c("Education science medicine", "PE and hedge funds"),  c("Non-financial business", "PE and hedge funds"),  c("Non-profits/philanthropy", "PE and hedge funds"), c("Public sector", "PE and hedge funds"))
+
+my_comparisons_2017 <- list(c("Other finance", "PE and hedge funds"),  c("Non-financial business", "PE and hedge funds"),  c("Non-profits/philanthropy", "PE and hedge funds"), c("Education science medicine", "PE and hedge funds"), c("Public sector", "PE and hedge funds"))
+
+group_centrality_2003$Group <- factor(group_centrality_2003$Group, levels = c("Public sector", "Education science medicine", "Non-profits/philanthropy", "Non-financial business", "Other finance", "PE and hedge funds"))
+
+group_centrality_2017$Group <- factor(group_centrality_2017$Group, levels = c("Public sector", "Education science medicine", "Non-profits/philanthropy", "Non-financial business", "Other finance", "PE and hedge funds"))
+
+eigen_2003 <- centrality_combined %>%
+  filter(!is.na(Group)) %>% 
+  filter(year == 2003) %>% 
+  #mutate(eigenvector=eigenvector+1e-5) %>% 
+  #filter(eigenvector>=1e-5) %>% 
+  ggplot(aes(x = reorder(Group, eigenvector, FUN = mean), y = eigenvector , fill = Group)) +
+    geom_boxplot(color="black") +
+    geom_point(data = group_centrality_2003, aes(y = eigenvector_mean, x = Group), 
+               shape = 5, color = "black", size = 2) +
+    geom_text(data = group_centrality_2003, 
+              aes(x = Group, label = paste0("Mean=",round(eigenvector_mean,3))), y=-0.1) +
+    stat_compare_means(comparisons = my_comparisons_2003, label = "p.signif") +
+    stat_compare_means(method = "anova") +
+    geom_text(stat="count", aes(label=paste0("n=",..count..)), y=-0.2) +
+    geom_hline(data = altfinance_centrality_2003, aes(yintercept = eigenvector_mean), 
+               color = "black", size = 0.25,linetype="dashed") +
+    #scale_y_log10(labels=comma) +
+    labs(x = "Economic sectors", y = "Eigenvector centrality", 
+         title = "2003: Eigenvector centrality of board members' organizations") +
+    theme_light() +
+    theme(legend.position = "none")+
+    expand_limits(y=-0.2)
+
+
+eigen_2017 <- centrality_combined %>%
+  filter(!is.na(Group)) %>% 
+  filter(year == 2017) %>% 
+  #mutate(eigenvector=eigenvector+1e-5) %>% 
+  #filter(eigenvector>=1e-5) %>% 
+  ggplot(aes(x = reorder(Group, eigenvector, FUN = mean), y = eigenvector , fill = Group)) +
+    geom_boxplot(color="black") +
+    geom_point(data = group_centrality_2017, aes(y = eigenvector_mean, x = Group), 
+               shape = 5, color = "black", size = 2) +
+    geom_text(data = group_centrality_2017, 
+              aes(x = Group, label = paste0("Mean=",round(eigenvector_mean,3))), y=-0.1) +
+    #scale_y_log10(labels=comma) +
+    stat_compare_means(comparisons = my_comparisons_2017, label = "p.signif") +
+    stat_compare_means(method = "anova") +
+    geom_text(stat="count", aes(label=paste0("n=",..count..)), y=-0.2) +
+    geom_hline(data = altfinance_centrality_2017, aes(yintercept = eigenvector_mean), 
+               color = "black", size = 0.25,linetype="dashed") +
+    labs(x = "Economic sectors", y = "Eigenvector centrality", 
+         title = "2017: Eigenvector centrality of board members' organizations") +
+    theme_light() +
+    theme(legend.position = "none")+
+    expand_limits(y=-0.2)
+
+#ggsave("eigenvector_log.png", plot = eigenvector_log, device="png", width = 13, height = 8)
+
+centrality_measures <- ggarrange(degree_2003, eigen_2003, degree_2017, eigen_2017,
+          ncol = 2, nrow = 2)
+
+ggsave(centrality_measures, file = "centrality_measures.png", width = 22, height = 13.5)
+
+eigen <- ggarrange(eigen_2003, eigen_2017,ncol = 1, nrow = 2)
+```
+
+
+
+# Making network visualizations: 
+
+private and public, 2003/2017, weighted degree
+```{r}
+# node list
+node_list <- board_members_updated %>% 
+  filter(!is.na(institutionname)) %>% 
+  filter(!is.na(firmname_new)) %>% 
+  filter(!is.na(employer_type_aggregated)) %>% 
+  select(firmname_new, employer_type_aggregated) %>% 
+  unique() %>% 
+  rename(group_from = employer_type_aggregated,
+         id = firmname_new)
+
+node_list_new <- node_list %>% rename(group_to = group_from)
+
+
+## edge list 2017 private and public 
+org_list <- board_members_updated %>% 
+  filter(year == 2017) %>% 
+  filter(!is.na(institutionname)) %>% 
+  filter(!is.na(firmname_new)) %>% 
+  filter(!is.na(employer_type_aggregated)) %>% 
+  group_by(firmname_new, institutionname, employer_type_aggregated) %>% 
+  summarise(weight = n()) %>% 
+  rename(from = firmname_new,
+         to = institutionname,
+         group = employer_type_aggregated)  
+
+g <- graph.data.frame(org_list, directed = FALSE)
+V(g)$type <- V(g)$name %in% org_list$to
+organizations <- as_incidence_matrix(g)
+organizations <- organizations %*% t(organizations)
+diag(organizations) <- 0
+g <- graph_from_adjacency_matrix(organizations, mode = "undirected", weighted = TRUE)
+
+org <- get.data.frame(g)
+org <- left_join(org, node_list, by = c("from"="id"))
+org <- left_join(org, node_list_new, by = c("to"="id"))
+
+edge_list <- org %>% 
+  group_by(group_to, group_from) %>% 
+  summarise(weight = sum(weight)) %>% 
+  rename(from = group_from,
+         to = group_to) %>% 
+  mutate(weight = ifelse(from==to,NA,weight)) %>% 
+  filter(!is.na(weight)) 
+
+g <- graph.data.frame(edge_list, directed = FALSE)
+g <- simplify(g, remove.multiple = TRUE)
+#V(g)$size <- eigen_centrality(g)$vector
+V(g)$size <- graph.strength(g)  
+org_new <- get.data.frame(g)
+
+all_2017 <- ggraph(g, layout = 'circle') + 
+    geom_edge_fan(aes(width = weight/10, alpha = weight), 
+                  show.legend = FALSE, color = "grey") + 
+    geom_node_point(aes(size = size, color = name)) + 
+    geom_node_text(aes(label = name), size = 4.5, repel = TRUE) +
+    scale_size(range = c(1, 16)) +
+    scale_edge_width_continuous(range = c(1, 10))+
+    theme_graph(fg_text_colour = 'white') +
+    theme(legend.position = "none")
+
+
+## edge list 2003 private and public 
+org_list <- board_members_updated %>% 
+  filter(year == 2003) %>% 
+  filter(!is.na(institutionname)) %>% 
+  filter(!is.na(firmname_new)) %>% 
+  filter(!is.na(employer_type_aggregated)) %>% 
+  group_by(firmname_new, institutionname, employer_type_aggregated) %>% 
+  summarise(weight = n()) %>% 
+  rename(from = firmname_new,
+         to = institutionname,
+         group = employer_type_aggregated)  
+
+g <- graph.data.frame(org_list, directed = FALSE)
+V(g)$type <- V(g)$name %in% org_list$to
+organizations <- as_incidence_matrix(g)
+organizations <- organizations %*% t(organizations)
+diag(organizations) <- 0
+g <- graph_from_adjacency_matrix(organizations, mode = "undirected", weighted = TRUE)
+
+org <- get.data.frame(g)
+org <- left_join(org, node_list, by = c("from"="id"))
+org <- left_join(org, node_list_new, by = c("to"="id"))
+
+edge_list <- org %>% 
+  group_by(group_to, group_from) %>% 
+  summarise(weight = sum(weight)) %>% 
+  rename(from = group_from,
+         to = group_to) %>% 
+  mutate(weight = ifelse(from==to,NA,weight)) %>% 
+  filter(!is.na(weight)) 
+
+g <- graph.data.frame(edge_list, directed = FALSE)
+g <- simplify(g, remove.multiple = TRUE)
+#V(g)$size <- eigen_centrality(g)$vector
+V(g)$size <- graph.strength(g)  
+org_new <- get.data.frame(g)
+
+all_2003 <- ggraph(g, layout = 'circle') + 
+    geom_edge_fan(aes(width = weight/10, alpha = weight), 
+                  show.legend = FALSE, color = "grey") + 
+    geom_node_point(aes(size = size, color = name)) + 
+    geom_node_text(aes(label = name), size = 4.5, repel = TRUE) +
+    scale_size(range = c(1, 16)) +
+    scale_edge_width_continuous(range = c(1, 10))+
+    theme_graph(fg_text_colour = 'white') +
+    theme(legend.position = "none")
+
+
+## edge list 2017 private  
+org_list <- board_members_updated %>% 
+  filter(year == 2017) %>% 
+  filter(!is.na(institutionname)) %>% 
+  filter(!is.na(firmname_new)) %>% 
+  filter(!is.na(employer_type_aggregated)) %>% 
+  filter(publicprivate == "Private") %>% 
+  group_by(firmname_new, institutionname, employer_type_aggregated) %>% 
+  summarise(weight = n()) %>% 
+  rename(from = firmname_new,
+         to = institutionname,
+         group = employer_type_aggregated)  
+
+g <- graph.data.frame(org_list, directed = FALSE)
+V(g)$type <- V(g)$name %in% org_list$to
+organizations <- as_incidence_matrix(g)
+organizations <- organizations %*% t(organizations)
+diag(organizations) <- 0
+g <- graph_from_adjacency_matrix(organizations, mode = "undirected", weighted = TRUE)
+
+org <- get.data.frame(g)
+org <- left_join(org, node_list, by = c("from"="id"))
+org <- left_join(org, node_list_new, by = c("to"="id"))
+
+edge_list <- org %>% 
+  group_by(group_to, group_from) %>% 
+  summarise(weight = sum(weight)) %>% 
+  rename(from = group_from,
+         to = group_to) %>% 
+  mutate(weight = ifelse(from==to,NA,weight)) %>% 
+  filter(!is.na(weight)) 
+
+g <- graph.data.frame(edge_list, directed = FALSE)
+g <- simplify(g, remove.multiple = TRUE)
+#V(g)$size <- eigen_centrality(g)$vector
+V(g)$size <- graph.strength(g)  
+org_new <- get.data.frame(g)
+
+private_2017 <- ggraph(g, layout = 'circle') + 
+    geom_edge_fan(aes(width = weight/10, alpha = weight), 
+                  show.legend = FALSE, color = "grey") + 
+    geom_node_point(aes(size = size, color = name)) + 
+    geom_node_text(aes(label = name), size = 4.5, repel = TRUE) +
+    scale_size(range = c(1, 16)) +
+    scale_edge_width_continuous(range = c(1, 10))+
+    theme_graph(fg_text_colour = 'white') +
+    theme(legend.position = "none")
+
+
+
+## edge list 2017 public
+org_list <- board_members_updated %>% 
+  filter(year == 2017) %>% 
+  filter(!is.na(institutionname)) %>% 
+  filter(!is.na(firmname_new)) %>% 
+  filter(!is.na(employer_type_aggregated)) %>% 
+  filter(publicprivate == "Public") %>% 
+  group_by(firmname_new, institutionname, employer_type_aggregated) %>% 
+  summarise(weight = n()) %>% 
+  rename(from = firmname_new,
+         to = institutionname,
+         group = employer_type_aggregated)  
+
+g <- graph.data.frame(org_list, directed = FALSE)
+V(g)$type <- V(g)$name %in% org_list$to
+organizations <- as_incidence_matrix(g)
+organizations <- organizations %*% t(organizations)
+diag(organizations) <- 0
+g <- graph_from_adjacency_matrix(organizations, mode = "undirected", weighted = TRUE)
+
+org <- get.data.frame(g)
+org <- left_join(org, node_list, by = c("from"="id"))
+org <- left_join(org, node_list_new, by = c("to"="id"))
+
+edge_list <- org %>% 
+  group_by(group_to, group_from) %>% 
+  summarise(weight = sum(weight)) %>% 
+  rename(from = group_from,
+         to = group_to) %>% 
+  mutate(weight = ifelse(from==to,NA,weight)) %>% 
+  filter(!is.na(weight)) 
+
+g <- graph.data.frame(edge_list, directed = FALSE)
+g <- simplify(g, remove.multiple = TRUE)
+#V(g)$size <- eigen_centrality(g)$vector
+V(g)$size <- graph.strength(g)  
+org_new <- get.data.frame(g)
+
+public_2017 <- ggraph(g, layout = 'circle') + 
+    geom_edge_fan(aes(width = weight/10, alpha = weight), 
+                  show.legend = FALSE, color = "grey") + 
+    geom_node_point(aes(size = size, color = name)) + 
+    geom_node_text(aes(label = name), size = 4.5, repel = TRUE) +
+    scale_size(range = c(1, 16)) +
+    scale_edge_width_continuous(range = c(1, 10))+
+    theme_graph(fg_text_colour = 'white') +
+    theme(legend.position = "none")
+
+## edge list 2003 private  
+org_list <- board_members_updated %>% 
+  filter(year == 2003) %>% 
+  filter(!is.na(institutionname)) %>% 
+  filter(!is.na(firmname_new)) %>% 
+  filter(!is.na(employer_type_aggregated)) %>% 
+  filter(publicprivate == "Private") %>% 
+  group_by(firmname_new, institutionname, employer_type_aggregated) %>% 
+  summarise(weight = n()) %>% 
+  rename(from = firmname_new,
+         to = institutionname,
+         group = employer_type_aggregated)  
+
+g <- graph.data.frame(org_list, directed = FALSE)
+V(g)$type <- V(g)$name %in% org_list$to
+organizations <- as_incidence_matrix(g)
+organizations <- organizations %*% t(organizations)
+diag(organizations) <- 0
+g <- graph_from_adjacency_matrix(organizations, mode = "undirected", weighted = TRUE)
+
+org <- get.data.frame(g)
+org <- left_join(org, node_list, by = c("from"="id"))
+org <- left_join(org, node_list_new, by = c("to"="id"))
+
+edge_list <- org %>% 
+  group_by(group_to, group_from) %>% 
+  summarise(weight = sum(weight)) %>% 
+  rename(from = group_from,
+         to = group_to) %>% 
+  mutate(weight = ifelse(from==to,NA,weight)) %>% 
+  filter(!is.na(weight)) 
+
+g <- graph.data.frame(edge_list, directed = FALSE)
+g <- simplify(g, remove.multiple = TRUE)
+#V(g)$size <- eigen_centrality(g)$vector
+V(g)$size <- graph.strength(g)  
+org_new <- get.data.frame(g)
+
+private_2003 <- ggraph(g, layout = 'circle') + 
+    geom_edge_fan(aes(width = weight/10, alpha = weight), 
+                  show.legend = FALSE, color = "grey") + 
+    geom_node_point(aes(size = size, color = name)) + 
+    geom_node_text(aes(label = name), size = 4.5, repel = TRUE) +
+    scale_size(range = c(1, 16)) +
+    scale_edge_width_continuous(range = c(1, 10))+
+    theme_graph(fg_text_colour = 'white') +
+    theme(legend.position = "none")
+
+
+
+## edge list 2017 public
+org_list <- board_members_updated %>% 
+  filter(year == 2003) %>% 
+  filter(!is.na(institutionname)) %>% 
+  filter(!is.na(firmname_new)) %>% 
+  filter(!is.na(employer_type_aggregated)) %>% 
+  filter(publicprivate == "Public") %>% 
+  group_by(firmname_new, institutionname, employer_type_aggregated) %>% 
+  summarise(weight = n()) %>% 
+  rename(from = firmname_new,
+         to = institutionname,
+         group = employer_type_aggregated)  
+
+g <- graph.data.frame(org_list, directed = FALSE)
+V(g)$type <- V(g)$name %in% org_list$to
+organizations <- as_incidence_matrix(g)
+organizations <- organizations %*% t(organizations)
+diag(organizations) <- 0
+g <- graph_from_adjacency_matrix(organizations, mode = "undirected", weighted = TRUE)
+
+org <- get.data.frame(g)
+org <- left_join(org, node_list, by = c("from"="id"))
+org <- left_join(org, node_list_new, by = c("to"="id"))
+
+edge_list <- org %>% 
+  group_by(group_to, group_from) %>% 
+  summarise(weight = sum(weight)) %>% 
+  rename(from = group_from,
+         to = group_to) %>% 
+  mutate(weight = ifelse(from==to,NA,weight)) %>% 
+  filter(!is.na(weight)) 
+
+g <- graph.data.frame(edge_list, directed = FALSE)
+g <- simplify(g, remove.multiple = TRUE)
+#V(g)$size <- eigen_centrality(g)$vector
+V(g)$size <- graph.strength(g)  
+org_new <- get.data.frame(g)
+
+public_2003 <- ggraph(g, layout = 'circle') + 
+    geom_edge_fan(aes(width = weight/10, alpha = weight), 
+                  show.legend = FALSE, color = "grey") + 
+    geom_node_point(aes(size = size, color = name)) + 
+    geom_node_text(aes(label = name), size = 4.5, repel = TRUE) +
+    scale_size(range = c(1, 16)) +
+    scale_edge_width_continuous(range = c(1, 10))+
+    theme_graph(fg_text_colour = 'white') +
+    theme(legend.position = "none")
+
+
+network <- ggarrange(private_2003, public_2003, private_2017, public_2017,
+          labels = c("Network of private universities in 2003", 
+                     "Network of public universities in 2003",
+                     "Network of private universities in 2017", 
+                     "Network of public universities in 2017"),
+          ncol = 2, nrow = 2)
+
+ggsave(network, file = "network.png", width = 14, height = 14)
+
+
+combined <- ggarrange(network, weighted_degree, widths = c(3, 2.3), ncol = 2, nrow = 1)
+
+ggsave(combined, file = "combined.png", width = 25, height = 14)
+
+
+# Eigenvector centrality
+combined2 <- ggarrange(network, eigen, widths = c(3, 2.3), ncol = 2, nrow = 1)
+
+ggsave(combined2, file = "combined2.png", width = 25, height = 14)
+```
