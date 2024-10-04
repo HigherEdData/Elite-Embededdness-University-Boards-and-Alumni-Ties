@@ -1,0 +1,345 @@
+---
+title: "Table 1, Table 2, and Table A.2"
+output: html_document
+---
+
+Load libraries
+```{r warning=FALSE}
+library(tidyverse)
+library(foreign) # to read the stata files
+library(rstatix) # data analysis package
+library(psych) # data analysis package
+library(stargazer) # creates tables from R statistical output
+library(sjPlot)# creates tables from R statistical output
+library(ggpubr) # ggplot extension for lm
+library(GGally)
+library(haven) # to export stata files
+library(qwraps2)
+library(ggpmisc)
+library(plm)
+library(cowplot)
+library(lmtest)
+library(sandwich)
+library(car)
+library(ggrepel)
+library(olsrr)
+library(clubSandwich)
+library(patchwork)
+library(pscl)
+library(igraph)
+library(visNetwork)
+library(RColorBrewer)
+library(ggraph)
+library(ggforce)
+library(tidygraph)
+library(graphlayouts)
+library(oaqc)
+library(concaveman)
+library(scales)
+library(gtsummary)
+library(fastDummies)
+library(table1)
+```
+
+
+
+Load data
+```{r}
+board_members <- read_dta("board_members_all_long20231117.dta")
+
+forbes <- read_dta("d_forbes400_alum_board_1989_2003_2017.dta")
+
+preqin <- read_dta("preqin_sandp_trustee_ties.dta")
+
+school_level <- read_dta("d_school_level_elite_embed.dta")
+```
+
+
+Modify the datasets
+```{r}
+#Limit observations to top 60 from 2003 to 2017
+board_members <- board_members %>% 
+  filter(schooltype!="liberal arts") %>% 
+  filter(unitid!=232186 & unitid!=126818 & unitid!=209542 & unitid!=221759 & unitid!=102614 & unitid!=129020 & unitid!=181464) %>% 
+  filter(year > 2002)
+
+# Create dummy variables for each type of board member
+board_members <- board_members %>% 
+  mutate(Alt_finance_x = ifelse(employer_type_aggregated=="PE and hedge funds",1,0),
+         Other_finance_x =  ifelse(employer_type_aggregated=="Other finance",1,0),
+         Edu_sci_med_x =  ifelse(employer_type_aggregated=="Education science medicine",1,0),
+         Nonfinance_business_x =  ifelse(employer_type_aggregated=="Non-financial business",1,0),
+         Nonprofit_x =  ifelse(employer_type_aggregated=="Non-profits/philanthropy",1,0),
+         Public_sector_x =  ifelse(employer_type_aggregated=="Public sector",1,0),
+         Real_estate_x = ifelse(employer_type_aggregated=="Real estate",1,0),
+         Private = ifelse(schooltype=="research",1,0),
+         Public = ifelse(schooltype=="public",1,0))
+
+
+#Limit observation to top 60 from 2003 to 2017 (school level data)
+school_level <- school_level %>% 
+  filter(schooltype!="liberal arts") %>% 
+  filter(unitid!=232186 & unitid!=126818 & unitid!=209542 & unitid!=221759 & unitid!=102614 & unitid!=129020 & unitid!=181464) %>% 
+  filter(year > 2002)
+```
+
+
+Table 1: Person level data (Forbes 400)
+```{r}
+my.render.cont <- function(x) {
+    with(stats.apply.rounding(stats.default(x), digits=4), c("",
+        "Mean (SD)"=sprintf("%s (%s)", MEAN, SD)))
+}
+
+forbes <- forbes %>% 
+  mutate(toppublicmba = ifelse(mbaschooltype==2, 1, 0),
+         topprivatemba = ifelse(mbaschooltype==3, 1, 0),
+         toppublicba = ifelse(collegeschooltype==2, 1, 0),
+         topprivateba = ifelse(collegeschooltype==3, 1, 0))
+
+table1(~ boardtop30private + boardtop30public + pehedge + otherfin + technology + worth + inherited + topprivateba + toppublicba + topprivatemba +  toppublicmba, data = forbes, render.continuous=my.render.cont)
+
+forbes %>% 
+  select(id) %>% 
+  unique()
+```
+
+
+
+Table 1: Person level data (Top 60 University Trustees)
+```{r}
+my.render.cont <- function(x) {
+    with(stats.apply.rounding(stats.default(x), digits=2), c("",
+        "Mean (SD)"=sprintf("%s (%s)", MEAN, SD)))
+}
+
+table1(~ Public + Private + Alt_finance_x + Other_finance_x + Real_estate_x + Nonfinance_business_x + Nonprofit_x  + Edu_sci_med_x + Public_sector_x, data = board_members, render.continuous=my.render.cont)
+
+board_members %>% 
+  select(firstname, lastname, firmname_new) %>% 
+  unique()
+```
+
+
+
+Table 1: University-level data (2003 - 2017)
+```{r}
+my.render.cont <- function(x) {
+    with(stats.apply.rounding(stats.default(x), digits=4), c("",
+        "Mean (SD)"=sprintf("%s (%s)", MEAN, SD)))
+}
+
+# Getting estimates from school_level
+school_level <- school_level %>% 
+  mutate(rejectrate = 1 - acceptrate) %>% 
+  mutate(log_enrollment = log(fte_count),
+         log_endowment = log(endowment_assets/cpi_scalar_2017),
+         log_revenue = log(total03_revenue/cpi_scalar_2017))
+
+table1(~ pehedge + otherfinance + rejectrate + log_enrollment + log_endowment + log_revenue  + fgrnt_p + pefraceunder| schooltype, data = school_level, render.continuous=my.render.cont)
+
+# Forbes 400 pe alumni (2003/2007 only)
+school_level_2003_2017 <- school_level %>% 
+  filter(year == 2003 | year == 2017)
+
+table1(~ alumnipehedge | schooltype, data = school_level_2003_2017, render.continuous=my.render.cont)
+```
+
+
+
+Table 1: Private equity firm-level data (2003-2017)
+```{r}
+my.render.cont <- function(x) {
+    with(stats.apply.rounding(stats.default(x), digits=4), c("",
+        "Mean (SD)"=sprintf("%s (%s)", MEAN, SD)))
+}
+
+preqin_updated <- preqin %>% 
+  mutate(strength = ifelse(is.na(strength), 0, strength),
+         Non_finance_business = ifelse(is.na(Non_finance_business), 0, Non_finance_business)) %>%
+  mutate(All_other_ties = strength-Non_finance_business,
+         excess_irr = net_irr_pcent - sp500_return_pct) %>% 
+  mutate(fund_type = ifelse(fund_type== "Early Stage: Seed", "Early_Stage",
+                     ifelse(fund_type== "Early Stage: Start-up", "Early_Stage",
+                     ifelse(fund_type== "Early Stage", "Early_Stage",
+                     ifelse(fund_type== "Direct Secondaries", "Secondaries",
+                     ifelse(fund_type== "Co-Investment Multi-Manager", "Coinvestment",
+                     ifelse(fund_type== "Co-investment", "Coinvestment",
+                     ifelse(fund_type== "Fund of Funds", "Fund_of_Funds",
+                     ifelse(fund_type== "Venture (General)", "Venture",
+                     ifelse(fund_type== "Expansion / Late Stage", "Expansion", fund_type)))))))))) %>% 
+  filter(!is.na(net_irr_pcent), !is.na(fundvaluemnusd)) %>% 
+  filter(fund_focus=="US"|fund_focus=="Europe" | fund_focus == "Diversified Multi-Re")
+
+# All PE firms
+preqin_updated_firm <- preqin_updated %>% 
+  group_by(firmid, year, strength, Non_finance_business, All_other_ties, privatetop30, publictop30, rejectrtindex) %>% 
+  summarise(fundvaluemnusd = sum(fundvaluemnusd, na.rm = TRUE)/1000000000,
+         excess_irr = sum(excess_irr*fundvaluemnusd)/sum(fundvaluemnusd, na.rm = TRUE)) %>% 
+  group_by(firmid) %>% 
+  mutate(count = n()) %>% 
+  filter(count>1)
+
+table1(~ excess_irr + fundvaluemnusd + privatetop30 + publictop30 + Non_finance_business + All_other_ties, data = preqin_updated_firm, render.continuous=my.render.cont)
+
+preqin_updated_firm %>% 
+  select(firmid) %>% 
+  unique()
+
+# PE firms with trustee ties
+preqin_w_trustee <- preqin_updated %>% 
+  group_by(firmid, year, strength, Non_finance_business, All_other_ties, privatetop30, publictop30, rejectrtindex) %>% 
+  summarise(fundvaluemnusd = sum(fundvaluemnusd, na.rm = TRUE)/1000000000,
+         excess_irr = sum(excess_irr*fundvaluemnusd)/sum(fundvaluemnusd, na.rm = TRUE)) %>% 
+  ungroup() %>% 
+  group_by(firmid) %>% 
+  mutate(max_strength = max(strength, na.rm = TRUE)) %>% 
+  filter(max_strength > 0) %>% 
+  mutate(count = n()) %>% 
+  filter(count>1)
+
+table1(~  excess_irr + fundvaluemnusd + privatetop30 + publictop30 + Non_finance_business + All_other_ties, data = preqin_w_trustee, render.continuous=my.render.cont)
+
+preqin_w_trustee %>% 
+  ungroup() %>% 
+  select(firmid) %>% 
+  unique()
+```
+
+
+
+Table 2: Weighted degree of network centrality for trustees’ economic organizations by industry
+```{r}
+board_members_organizations <- board_members %>%
+  select(strength, employer_type_aggregated, year, firmname_new) %>%
+  unique() %>% 
+  filter(employer_type_aggregated != "Unknown_sector")
+
+degree <- board_members_organizations %>%   
+  filter(year == 2003 | year == 2017) %>%   
+  group_by(employer_type_aggregated, year) %>% 
+  summarise(mean = round(mean(strength),2),
+            sd = round(sd(strength), 2), 
+            count = n()) %>% 
+  mutate(year = as.character(year)) %>% 
+  arrange(year, desc(mean))
+
+degree_all <- board_members_organizations %>%
+  group_by(employer_type_aggregated) %>% 
+  summarise(mean = round(mean(strength),2),
+            sd = round(sd(strength), 2),
+            count = n()) %>% 
+  mutate(year = "2003 to 2017") %>% 
+  arrange(desc(mean))
+    
+degree <- bind_rows(degree, degree_all)
+
+degree <- degree %>% 
+  mutate(Mean_SD_Count = paste(mean, '\n', "(", sd, ")", '\n', "N = ", count, sep = "")) %>% 
+  select(employer_type_aggregated, Mean_SD_Count, year) %>% 
+  pivot_wider(names_from = year, values_from = Mean_SD_Count)
+
+
+## Summary for all sectors
+degree_x <- board_members_organizations %>%   
+  filter(year == 2003 | year == 2017) %>% 
+  group_by(year) %>% 
+  summarise(mean = round(mean(strength),2),
+            sd = round(sd(strength), 2), 
+            count = n()) %>% 
+  mutate(year = as.character(year)) %>% 
+  arrange(year, desc(mean))
+
+degree_all_x <- board_members_organizations %>%
+  summarise(mean = round(mean(strength),2),
+            sd = round(sd(strength), 2),
+            count = n()) %>% 
+  mutate(year = "2003 to 2017") %>% 
+  arrange(desc(mean))
+    
+degree_x <- bind_rows(degree_x, degree_all_x)
+
+degree_x <- degree_x %>% 
+  mutate(employer_type_aggregated = "All sectors") %>% 
+  mutate(Mean_SD_Count = paste(mean, '\n', "(", sd, ")", '\n', "N = ", count, sep = "")) %>% 
+  select(employer_type_aggregated, Mean_SD_Count, year) %>% 
+  pivot_wider(names_from = year, values_from = Mean_SD_Count)
+
+
+degree <- bind_rows(degree, degree_x)
+
+rm(degree_x, degree_all_x, degree_all)
+
+write.csv(degree, file = "Table_2.csv")
+```
+
+
+
+Table A.2: Private equity fund types and fund focus by share of capital invested
+```{r}
+#Fund Focus for all PE firms
+preqin_fund_focus <- preqin_updated %>% 
+  mutate(fund_focus = ifelse(fund_focus=="Diversified Multi-Re","Diversified",fund_focus)) %>% 
+  group_by(firmid, year, fund_focus) %>%
+  summarise(fund_size = sum(fundvaluemnusd, na.rm = TRUE)) %>% 
+  mutate(fund_size_pct = round(fund_size*100/sum(fund_size, na.rm = TRUE),2)) %>% 
+  select(firmid, year, fund_focus, fund_size_pct) %>% 
+  pivot_wider(names_from = fund_focus, values_from = c(fund_size_pct)) %>% 
+  replace(is.na(.), 0) %>% 
+  group_by(firmid) %>% 
+  mutate(count = n()) %>% 
+  filter(count>1)
+  
+table1(~ Europe + US + Diversified, data = preqin_fund_focus, render.continuous=my.render.cont)  
+
+## Fund focus for PE firms with trustee ties
+preqin_fund_focus_top60 <- preqin_updated %>% 
+  mutate(fund_focus = ifelse(fund_focus=="Diversified Multi-Re","Diversified",fund_focus)) %>% 
+  group_by(firmid, year, fund_focus, strength) %>%
+  summarise(fund_size = sum(fundvaluemnusd, na.rm = TRUE)) %>% 
+  mutate(fund_size_pct = round(fund_size*100/sum(fund_size, na.rm = TRUE),2)) %>% 
+  select(firmid, year, fund_focus, fund_size_pct, strength) %>% 
+  group_by(firmid) %>% 
+  mutate(max_strength = max(strength, na.rm = TRUE)) %>% 
+  filter(max_strength > 0) %>% 
+  mutate(count = n()) %>% 
+  filter(count>1) %>% 
+  pivot_wider(names_from = fund_focus, values_from = c(fund_size_pct)) %>% 
+  replace(is.na(.), 0)
+  
+table1(~ Europe + US + Diversified, data = preqin_fund_focus_top60, render.continuous=my.render.cont)  
+
+## Fund type for all PE firms
+preqin_fund_type <- preqin_updated %>% 
+  group_by(firmid, year, fund_type) %>%
+  summarise(fund_size = sum(fundvaluemnusd, na.rm = TRUE)) %>% 
+  mutate(fund_size_pct = round(fund_size*100/sum(fund_size, na.rm = TRUE),2)) %>% 
+  select(firmid, year, fund_type, fund_size_pct) %>% 
+  pivot_wider(names_from = fund_type, values_from = c(fund_size_pct)) %>% 
+  replace(is.na(.), 0) %>% 
+  group_by(firmid) %>% 
+  mutate(count = n()) %>% 
+  filter(count>1)
+
+table1(~ Buyout + Growth + Fund_of_Funds + Venture + Coinvestment + Expansion + Secondaries + Early_Stage + Balanced + Turnaround, data = preqin_fund_type, render.continuous=my.render.cont)  
+
+# Fund type for PE firms with trustee ties 
+preqin_fund_type_top60 <- preqin_updated %>% 
+  group_by(firmid, year, fund_type, strength) %>%
+  summarise(fund_size = sum(fundvaluemnusd, na.rm = TRUE)) %>% 
+  mutate(fund_size_pct = round(fund_size*100/sum(fund_size, na.rm = TRUE),2)) %>% 
+  select(firmid, year, fund_type, fund_size_pct, strength) %>% 
+  group_by(firmid) %>% 
+  mutate(max_strength = max(strength, na.rm = TRUE)) %>% 
+  filter(max_strength > 0) %>% 
+  mutate(count = n()) %>% 
+  filter(count>1) %>% 
+  pivot_wider(names_from = fund_type, values_from = c(fund_size_pct)) %>% 
+  replace(is.na(.), 0)%>% 
+  group_by(firmid) %>% 
+  mutate(count = n()) %>% 
+  filter(count>1)
+
+table1(~ Buyout + Growth + Fund_of_Funds + Venture + Coinvestment + Expansion + Secondaries + Early_Stage + Balanced, data = preqin_fund_type_top60, render.continuous=my.render.cont)  
+```
+
