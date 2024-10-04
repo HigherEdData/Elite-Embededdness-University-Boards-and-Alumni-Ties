@@ -1,0 +1,497 @@
+---
+title: "Network analysis"
+output: html_document
+---
+
+Load libraries
+```{r warning=FALSE}
+library(tidyverse)
+library(foreign) # to read the stata files
+library(rstatix) # data analysis package
+library(psych) # data analysis package
+library(stargazer) # creates tables from R statistical output
+library(sjPlot)# creates tables from R statistical output
+library(ggpubr) # ggplot extension for lm
+library(GGally)
+library(haven) # to export stata files
+library(qwraps2)
+library(ggpmisc)
+library(plm)
+library(cowplot)
+library(lmtest)
+library(sandwich)
+library(car)
+library(ggrepel)
+library(olsrr)
+library(clubSandwich)
+library(patchwork)
+library(pscl)
+library(igraph)
+library(visNetwork)
+library(RColorBrewer)
+library(ggraph)
+library(ggforce)
+library(tidygraph)
+library(graphlayouts)
+library(oaqc)
+library(concaveman)
+library(scales)
+library(gtsummary)
+```
+
+
+
+Load data
+```{r}
+board_members_updated <- read_dta("board_members_all_long20231116.dta")
+
+# Update employer type if it is unknown
+board_members_updated <- board_members_updated %>% 
+  mutate(employer_type_aggregated= ifelse(is.na(employer_type_aggregated) | employer_type_aggregated =="", "Unknown_sector", employer_type_aggregated))
+```
+
+
+Network at the level of firms: loop
+```{r}
+datalist = list()
+
+organization_charachteristics <- board_members_updated %>% 
+  filter(schooltype!="liberal arts") %>% 
+  filter(unitid!=232186 & unitid!=126818 & unitid!=209542 & unitid!=221759 & unitid!=102614 & unitid!=129020 & unitid!=181464) %>% 
+  filter(!is.na(firmname_new)) %>% 
+  filter(year > 2002) %>% 
+  select(firmname_new, employer_type_aggregated) %>% 
+  unique() %>% 
+  rename(Group = employer_type_aggregated,
+         Id = firmname_new)
+
+
+for (i in 2003:2017){
+  
+org_list <- board_members_updated %>% 
+  filter(year > 2002) %>% 
+  filter(schooltype!="liberal arts") %>% 
+  filter(unitid!=232186 & unitid!=126818 & unitid!=209542 & unitid!=221759 & unitid!=102614 & unitid!=129020 & unitid!=181464) %>% 
+  filter(!is.na(firmname_new)) %>% 
+  filter(year == i) %>% 
+  group_by(firmname_new, schoolname) %>% 
+  summarise(weight = n()) %>% 
+  arrange(desc(weight)) %>% 
+  rename(from = firmname_new) %>% 
+  rename(to = schoolname)
+
+organizations <- as.matrix(as_adjacency_matrix(graph_from_data_frame(org_list, directed=TRUE)))
+
+organizations <- organizations %*% t(organizations)
+diag(organizations) <- 0
+
+organizations <- as.matrix(organizations,
+                           mode = "undirected",
+                           weighted = TRUE)
+
+g <- graph_from_adjacency_matrix(organizations, mode ="undirected", weighted = TRUE, diag = FALSE)
+
+
+V(g)$weighted_degree <- strength(g)       # Weighted degree
+V(g)$eig <- eigen_centrality(g)$vector          # Eigenvector centrality
+V(g)$hubs <- hub_score(g)$vector                # "Hub" centrality
+V(g)$authorities <- authority_score(g)$vector   # "Authority" centrality
+V(g)$betweenness <- betweenness(g)              # Vertex betweenness centrality
+
+
+centrality <- data.frame(Id   = V(g)$name,
+                         strength = V(g)$weighted_degree,
+                         betweenness = V(g)$betweenness,
+                         eigenvector = V(g)$eig,
+                         hubs = V(g)$hubs,
+                         authorities = V(g)$authorities)
+
+  centrality <- centrality %>% 
+  left_join(organization_charachteristics, by = "Id") %>% 
+  mutate(year = as.numeric(i))
+
+  datalist[[i]] <- centrality # add it to your list
+}
+
+centrality_combined = do.call(bind_rows, datalist)
+
+centrality_combined <- centrality_combined %>% 
+  filter(strength>0) %>% 
+  filter(Group != "Unknown_sector")
+```
+
+
+
+
+Calculating ties to different types of organizations
+```{r}
+datalist_alt_f = list()
+
+firm_charachteristics <- board_members_updated %>% 
+  filter(schooltype!="liberal arts") %>% 
+  filter(unitid!=232186 & unitid!=126818 & unitid!=209542 & unitid!=221759 & unitid!=102614 & unitid!=129020 & unitid!=181464) %>%  
+  filter(!is.na(firmname_new)) %>% 
+  filter(year > 2002) %>% 
+  select(firmname_new, employer_type_aggregated) %>% 
+  unique() %>% 
+  rename(group = employer_type_aggregated,
+         id = firmname_new) %>% 
+  mutate(group = ifelse(is.na(group),"Unknown_sector",group))
+
+for (i in 2003:2017)
+{
+    
+org_list <- board_members_updated %>% 
+  filter(year > 2002) %>% 
+  filter(schooltype!="liberal arts") %>% 
+  filter(unitid!=232186 & unitid!=126818 & unitid!=209542 & unitid!=221759 & unitid!=102614 & unitid!=129020 & unitid!=181464) %>%  
+  filter(!is.na(firmname_new)) %>% 
+  filter(year == i) %>% 
+  group_by(firmname_new, schoolname, employer_type_aggregated, year) %>% 
+  summarise(weight = n()) %>% 
+  arrange(desc(weight)) %>% 
+  rename(from = firmname_new,
+         to = schoolname,
+         group = employer_type_aggregated)
+
+organizations <- as.matrix(as_adjacency_matrix(graph_from_data_frame(org_list, directed=TRUE)))
+
+organizations <- organizations %*% t(organizations)
+diag(organizations) <- 0
+
+organizations <- as.matrix(organizations,
+                           mode = "undirected",
+                           weighted = TRUE)
+
+g <- graph_from_adjacency_matrix(organizations, mode ="directed", weighted = TRUE, diag = FALSE)
+
+edge_list <- as_data_frame(g)
+
+edge_list <- left_join(edge_list, firm_charachteristics, by = c("from"="id"))
+
+edge_list <- edge_list %>% 
+  group_by(group, to) %>% 
+  summarise(weight = sum(weight, na.rm = TRUE)) %>%
+  filter(!is.na(weight), !is.na(group)) %>% 
+  rename(id = to) %>% 
+  pivot_wider(names_from = group, values_from = weight) %>% 
+  mutate(year = as.numeric(i)) %>% 
+  mutate_all(~replace(., is.na(.), 0)) %>% 
+  rename("Edu_sci_med" = "Education science medicine",
+         "Non_finance_business"  = "Non-financial business",
+         "Real_estate" = "Real estate",
+         "Nonprofit" = "Non-profits/philanthropy",
+         "Other_finance" = "Other finance",
+         "Alt_finance" = "PE and hedge funds",
+         "Public_sector" = "Public sector")
+
+  datalist_alt_f[[i]] <- edge_list # add it to your list
+  
+}
+
+connections_combined = do.call(bind_rows, datalist_alt_f)
+```
+
+
+Add centrality measures to the board_members_updated dataset
+```{r}
+board_members_updated <- board_members_updated %>% 
+  left_join(centrality_combined, by = c("firmname_new" = "Id", "year")) 
+```
+
+
+Add connections to other types of orgs to the board_members_updated dataset
+```{r}
+board_members_updated <- board_members_updated %>% 
+  left_join(connections_combined, by = c("firmname_new" = "id", "year")) 
+```
+
+
+Exclude Group variable
+```{r}
+board_members_updated <- board_members_updated %>% 
+  select(-Group, - employer_type_aggregated_known)
+```
+
+
+Export board members stata file
+```{r}
+write_dta(board_members_updated, "board_members_all_long20231117.dta")
+```
+
+
+
+
+# Making network visualization (Figure 5)
+
+Load data
+```{r}
+board_members_updated <- read_dta("board_members_all_long20231117.dta")
+
+board_members_updated <- board_members_updated %>% 
+  mutate(employer_type_aggregated = case_when(
+    employer_type_aggregated == "Public sector" ~ "Elected officials, gov-t appointees",
+    TRUE ~ employer_type_aggregated))
+
+```
+
+
+Creating visualization (Figure 5)
+```{r}
+board_members_updated <- board_members_updated %>% 
+    mutate(employer_type_aggregated = case_when(
+    employer_type_aggregated == "Non-profits/philanthropy" ~ "Non-profits, philanthropy",
+    employer_type_aggregated == "Non-financial business" ~ "Non-financial businesses",
+    employer_type_aggregated == "Education science medicine" ~ "Education, science, medicine",
+    TRUE ~ employer_type_aggregated))
+
+# node list
+node_list <- board_members_updated %>% 
+  filter(schooltype!="liberal arts") %>% 
+  filter(unitid!=232186 & unitid!=126818 & unitid!=209542 & unitid!=221759 & unitid!=102614 & unitid!=129020 & unitid!=181464) %>% 
+  filter(!is.na(firmname_new)) %>%
+  filter(employer_type_aggregated!="Unknown_sector") %>% 
+  select(firmname_new, employer_type_aggregated) %>% 
+  unique() %>% 
+  rename(group_from = employer_type_aggregated,
+         id = firmname_new)
+
+node_list_new <- node_list %>% rename(group_to = group_from)
+
+## edge list 2017 private  
+org_list <- board_members_updated %>% 
+  filter(year == 2017) %>% 
+  filter(schooltype!="liberal arts") %>% 
+  filter(unitid!=232186 & unitid!=126818 & unitid!=209542 & unitid!=221759 & unitid!=102614 & unitid!=129020 & unitid!=181464) %>% 
+  filter(!is.na(firmname_new)) %>% 
+  filter(employer_type_aggregated!="Unknown_sector") %>% 
+  filter(publicprivate == "Private") %>% 
+  group_by(firmname_new, schoolname, employer_type_aggregated) %>% 
+  summarise(weight = n()) %>% 
+  rename(from = firmname_new,
+         to = schoolname,
+         group = employer_type_aggregated)
+
+g <- graph.data.frame(org_list, directed = FALSE)
+V(g)$type <- V(g)$name %in% org_list$to
+organizations <- as_incidence_matrix(g)
+organizations <- organizations %*% t(organizations)
+diag(organizations) <- 0
+g <- graph_from_adjacency_matrix(organizations, mode = "undirected", weighted = TRUE)
+
+org <- get.data.frame(g)
+org <- left_join(org, node_list, by = c("from"="id"))
+org <- left_join(org, node_list_new, by = c("to"="id"))
+
+edge_list <- org %>% 
+  group_by(group_to, group_from) %>% 
+  summarise(weight = sum(weight)) %>% 
+  rename(from = group_from,
+         to = group_to) %>% 
+  mutate(weight = ifelse(from==to,NA,weight)) %>% 
+  filter(!is.na(weight)) 
+
+g <- graph.data.frame(edge_list, directed = FALSE)
+g <- simplify(g, remove.multiple = TRUE)
+V(g)$size <- graph.strength(g)  
+org_new_2017_private <- get.data.frame(g)
+
+private_2017 <- ggraph(g, layout = 'circle') + 
+    geom_edge_fan(aes(width = weight/10, alpha = weight), 
+                  show.legend = FALSE, color = "grey") + 
+    geom_node_point(aes(size = size, color = name)) + 
+    geom_node_text(aes(label = name), size = 14, check_overlap = TRUE, repel = TRUE,
+                   nudge_y = -0.1, label.padding = unit(0.1, "lines")) +
+    scale_size(range = c(6.6, 49.6)) +
+    scale_edge_width_continuous(range = c(6.2, 37.7))+
+    theme_graph(fg_text_colour = 'white') +
+    theme(legend.position = "none")
+
+
+
+## edge list 2017 public
+org_list <- board_members_updated %>% 
+  filter(year == 2017) %>% 
+  filter(schooltype!="liberal arts") %>% 
+  filter(unitid!=232186 & unitid!=126818 & unitid!=209542 & unitid!=221759 & unitid!=102614 & unitid!=129020 & unitid!=181464) %>% 
+  filter(!is.na(firmname_new)) %>% 
+  filter(employer_type_aggregated!="Unknown_sector") %>% 
+  filter(publicprivate == "Public") %>% 
+  group_by(firmname_new, schoolname, employer_type_aggregated) %>% 
+  summarise(weight = n()) %>% 
+  rename(from = firmname_new,
+         to = schoolname,
+         group = employer_type_aggregated)  
+
+g <- graph.data.frame(org_list, directed = FALSE)
+V(g)$type <- V(g)$name %in% org_list$to
+organizations <- as_incidence_matrix(g)
+organizations <- organizations %*% t(organizations)
+diag(organizations) <- 0
+g <- graph_from_adjacency_matrix(organizations, mode = "undirected", weighted = TRUE)
+
+org <- get.data.frame(g)
+org <- left_join(org, node_list, by = c("from"="id"))
+org <- left_join(org, node_list_new, by = c("to"="id"))
+
+edge_list <- org %>% 
+  group_by(group_to, group_from) %>% 
+  summarise(weight = sum(weight)) %>% 
+  rename(from = group_from,
+         to = group_to) %>% 
+  mutate(weight = ifelse(from==to,NA,weight)) %>% 
+  filter(!is.na(weight)) 
+
+g <- graph.data.frame(edge_list, directed = FALSE)
+g <- simplify(g, remove.multiple = TRUE)
+V(g)$size <- graph.strength(g)  
+org_new_2017_public <- get.data.frame(g)
+
+public_2017 <- ggraph(g, layout = 'circle') + 
+    geom_edge_fan(aes(width = weight/10, alpha = weight), 
+                  show.legend = FALSE, color = "grey") + 
+    geom_node_point(aes(size = size, color = name)) + 
+    geom_node_text(aes(label = name), size = 14, check_overlap = TRUE, repel = TRUE,
+                   nudge_y = -0.1, label.padding = unit(0.1, "lines")) +
+    scale_size(range = c(2, 12)) +
+    scale_edge_width_continuous(range = c(2, 6))+
+    theme_graph(fg_text_colour = 'white') +
+    theme(legend.position = "none")
+
+
+
+## edge list 2003 private  
+org_list <- board_members_updated %>% 
+  filter(year == 2003) %>% 
+  filter(schooltype!="liberal arts") %>% 
+  filter(unitid!=232186 & unitid!=126818 & unitid!=209542 & unitid!=221759 & unitid!=102614 & unitid!=129020 & unitid!=181464) %>% 
+  filter(!is.na(firmname_new)) %>% 
+  filter(employer_type_aggregated!="Unknown_sector") %>% 
+  filter(publicprivate == "Private") %>% 
+  group_by(firmname_new, schoolname, employer_type_aggregated) %>% 
+  summarise(weight = n()) %>% 
+  rename(from = firmname_new,
+         to = schoolname,
+         group = employer_type_aggregated)  
+
+g <- graph.data.frame(org_list, directed = FALSE)
+V(g)$type <- V(g)$name %in% org_list$to
+organizations <- as_incidence_matrix(g)
+organizations <- organizations %*% t(organizations)
+diag(organizations) <- 0
+g <- graph_from_adjacency_matrix(organizations, mode = "undirected", weighted = TRUE)
+
+org <- get.data.frame(g)
+org <- left_join(org, node_list, by = c("from"="id"))
+org <- left_join(org, node_list_new, by = c("to"="id"))
+
+edge_list <- org %>% 
+  group_by(group_to, group_from) %>% 
+  summarise(weight = sum(weight)) %>% 
+  rename(from = group_from,
+         to = group_to) %>% 
+  mutate(weight = ifelse(from==to,NA,weight)) %>% 
+  filter(!is.na(weight)) 
+
+g <- graph.data.frame(edge_list, directed = FALSE)
+g <- simplify(g, remove.multiple = TRUE)
+V(g)$size <- graph.strength(g)  
+org_new_2003_private <- get.data.frame(g)
+
+private_2003 <- ggraph(g, layout = 'circle') + 
+    geom_edge_fan(aes(width = weight/10, alpha = weight), 
+                  show.legend = FALSE, color = "grey") + 
+    geom_node_point(aes(size = size, color = name)) + 
+    geom_node_text(aes(label = name), size = 14, check_overlap = TRUE, repel = TRUE,
+                   nudge_y = -0.1, label.padding = unit(0.1, "lines")) +
+    scale_size(range = c(7.2, 42.8)) +
+    scale_edge_width_continuous(range = c(5.4, 30.6))+
+    theme_graph(fg_text_colour = 'white') +
+    theme(legend.position = "none")
+
+
+
+## edge list 2003 public
+org_list <- board_members_updated %>% 
+  filter(year == 2003) %>% 
+  filter(schooltype!="liberal arts") %>% 
+  filter(unitid!=232186 & unitid!=126818 & unitid!=209542 & unitid!=221759 & unitid!=102614 & unitid!=129020 & unitid!=181464) %>% 
+  filter(!is.na(firmname_new)) %>% 
+  filter(employer_type_aggregated!="Unknown_sector") %>% 
+  filter(publicprivate == "Public") %>% 
+  group_by(firmname_new, schoolname, employer_type_aggregated) %>% 
+  summarise(weight = n()) %>% 
+  rename(from = firmname_new,
+         to = schoolname,
+         group = employer_type_aggregated)  
+
+g <- graph.data.frame(org_list, directed = FALSE)
+V(g)$type <- V(g)$name %in% org_list$to
+organizations <- as_incidence_matrix(g)
+organizations <- organizations %*% t(organizations)
+diag(organizations) <- 0
+g <- graph_from_adjacency_matrix(organizations, mode = "undirected", weighted = TRUE)
+
+org <- get.data.frame(g)
+org <- left_join(org, node_list, by = c("from"="id"))
+org <- left_join(org, node_list_new, by = c("to"="id"))
+
+edge_list <- org %>% 
+  group_by(group_to, group_from) %>% 
+  summarise(weight = sum(weight)) %>% 
+  rename(from = group_from,
+         to = group_to) %>% 
+  mutate(weight = ifelse(from==to,NA,weight)) %>% 
+  filter(!is.na(weight)) 
+
+g <- graph.data.frame(edge_list, directed = FALSE)
+g <- simplify(g, remove.multiple = TRUE)
+V(g)$size <- graph.strength(g)  
+org_new_2003_public <- get.data.frame(g)
+
+public_2003 <- ggraph(g, layout = 'circle') + 
+    geom_edge_fan(aes(width = weight/10, alpha = weight), 
+                  show.legend = FALSE, color = "grey") + 
+    geom_node_point(aes(size = size, color = name)) + 
+    geom_node_text(aes(label = name), size = 14, check_overlap = TRUE, repel = TRUE,
+                   nudge_y = -0.1, label.padding = unit(0.1, "lines")) +
+    scale_size(range = c(1.1, 11.0)) +
+    scale_edge_width_continuous(range = c(0.5, 7.2))+
+    theme_graph(fg_text_colour = 'white') +
+    theme(legend.position = "none")
+
+
+network <- ggarrange(private_2003, public_2003, private_2017, public_2017,
+          #labels = c("2003: Private university network", 
+          #           "2003: Public university network",
+          #           "2017: Private university network", 
+          #           "2017: Public university network"),
+          #font.label = list(size = 50, color = "black"),
+          ncol = 2, nrow = 2)
+
+ggsave(network, file = "Figure 5.png", width = 40, height = 40)
+
+
+## file comparing aggregated edge weights
+org_new_2017_private <- org_new_2017_private %>% 
+  mutate(network = "Private university network", year = "year_2017")
+
+org_new_2017_public <- org_new_2017_public %>% 
+  mutate(network = "Public university network", year = "year_2017")
+
+org_new_2003_private <- org_new_2003_private %>% 
+  mutate(network = "Private university network", year = "year_2003")
+
+org_new_2003_public <- org_new_2003_public %>% 
+  mutate(network = "Public university network", year = "year_2003")
+
+org_new_combined <- bind_rows(org_new_2017_private, org_new_2017_public, org_new_2003_private, org_new_2003_public)
+
+rm(org_new_2017_private, org_new_2017_public, org_new_2003_private, org_new_2003_public)
+
+org_new_combined <- org_new_combined %>% 
+  pivot_wider(names_from = year, values_from = weight) %>% 
+  mutate(increase_rate = year_2017/year_2003)
+
+write.csv(org_new_combined, "Network_tie_comparison.csv")
+```
